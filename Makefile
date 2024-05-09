@@ -1,17 +1,27 @@
-EXE=fetchmail
+CC = gcc
+CFLAGS = -Wall -g  # Include debugging symbols in all builds
+DFLAGS = -DNDEBUG
+SRC = main.c
+OBJ = $(SRC:.c=.o)
+EXE = fetchmail
+DEBUG_EXE = fetchmail_debug
 
-$(EXE): main.c
-	cc -Wall -o $(EXE) $<
+# Main production target
+all: CFLAGS += $(DFLAGS)
+all: $(EXE)
 
-# Rust
-# $(EXE): src/*.rs vendor
-# 	cargo build --frozen --offline --release
-# 	cp target/release/$(EXE) .
+debug: $(DEBUG_EXE)
 
-# vendor:
-# 	if [ ! -d "vendor/" ]; then \
-# 		cargo vendor --locked; \
-# 	fi
-
-format:
-	clang-format -style=file -i *.c
+# The executable
+$(EXE): $(OBJ)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+$(DEBUG_EXE): $(OBJ)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+# Object files
+$(OBJ): $(SRC)
+	$(CC) $(CFLAGS) -c $< -o $@
+# Clean up artifacts
+clean:
+	rm -f $(OBJ) $(EXE) $(DEBUG_EXE)
+cleanobj:
+	rm -f $(OBJ)
