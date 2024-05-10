@@ -134,12 +134,12 @@ char *generate_imap_tag() {
     sprintf(tag_buffer, "A%03d", tag_count);
     return tag_buffer;
 }
-char* full_recv(const int sock);
-char* full_recv(const int sock) {
+char* full_recv(int sock, int tf, const char* tag) ;
+char* full_recv(const int sock, const int tf, const char* tag) {
     char buffer[CHUNK_SIZE];
     char *data = NULL;
-    int received = 0;
-    int total_received = 0;  // Total bytes received.
+    int received;
+    int total_received = 0;
     while((received = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
         buffer[received] = '\0';
         char *temp = realloc(data, total_received + received + 1);
@@ -151,16 +151,22 @@ char* full_recv(const int sock) {
         data = temp;
         memcpy(data + total_received, buffer, received);
         total_received += received;
-        if(strstr(buffer, "\r\n") != NULL) {
-            char *delim_pos = strstr(data, "\r\n");
-            if (delim_pos != NULL) {
-                *delim_pos = '\0';
-                total_received = delim_pos - data;
+        if(tf == 0 && strncmp(data, "* OK", 4) == 0) {
+            // no tag response end
+            if(strstr(buffer, "\r\n") != NULL) {
+                break;
             }
+        } else if(tf == 1 && strncmp(data, tag, strlen(tag)) == 0) {
+            // tag response end
+            if(strstr(buffer, "\r\n") != NULL) {
+                break;
+            }
+        }
+        //normal response end
+        if(strstr(buffer, "\r\n") != NULL) {
             break;
         }
     }
-    // server closed the connection or an error occurred
     if (received < 0) {
         free(data);
         return NULL;
@@ -168,11 +174,22 @@ char* full_recv(const int sock) {
     if (data != NULL) {
         data[total_received] = '\0';
     }
-
     return data;
 }
+char* returnFinalResponse(char* response);
+char* returnFinalResponse(char* response) {
+    char *responseEnd = strrchr(response, '\r');
+    if (responseEnd != NULL) {
+        *responseEnd = '\0';
+        char *lastCarriage = strrchr(response, '\r');
+        if(lastCarriage != NULL){
+            return lastCarriage += 2;
+        }
+    }
+    return response;
+}
 int imap_authenticate_plain(int sock, const char *username, const char *password);
-int imap_authenticate_plain(int sock, const char *username, const char *password) {
+int imap_authenticate_plain(const int sock, const char *username, const char *password) {
     const size_t ulen = strlen(username);
     const size_t plen = strlen(password);
     const size_t total_length = ulen + plen + 2;
@@ -208,22 +225,59 @@ int imap_authenticate_plain(int sock, const char *username, const char *password
         error_print("Failed to send authentication command");
         return -1;
     }
-    char *response = full_recv(sock);
+    char *response = full_recv(sock, 1, (char*)tag);
     if(response == NULL)
     {
         error_print("Failed to receive data from the server");
         return -1;
     }
     int result = -1; // Default to failure
-    if (strncmp(response, tag, strlen(tag)) == 0 && strncmp(response + strlen(tag) + 1, "OK", 2) == 0) {
-        debug_print("SASL Authentication successful");
-        result = 0; // Successful authentication
+    const char* finalResponse = returnFinalResponse(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Authentication successful.");
+        result = 0;  // Success
+    } else {
+        error_print("Authentication failed.");
+    }
+
+    info_print("%s", response);
+    free(response);
+    return result;
+}
+int imap_select_folder(int sock, const char *folder);
+int imap_select_folder(const int sock, const char *folder)
+{
+    const char *tag = generate_imap_tag();
+    char *command = malloc(strlen(tag) + strlen(" SELECT ") + strlen(folder) + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return -1;
+    }
+    sprintf(command, "%s SELECT %s%s", tag, folder, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0) {
+        error_print("Failed to send SELECT command");
+        return -1;
+    }
+    char *response = full_recv(sock, 1, (char*)tag);
+    if(response == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return -1;
+    }
+    int result = -1; // Default to failure
+    const char* finalResponse = returnFinalResponse(response);
+
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Folder selection successful");
+        result = 0; // Successful folder selection
     }
     info_print("%s", response);
     free(response);
     return result;
 }
-
 int main(const int argc, char **argv)
 {
     char *username = NULL, *password = NULL, *folder = NULL, *messageNum = NULL, *command = NULL, *server_name = NULL;
@@ -250,7 +304,6 @@ int main(const int argc, char **argv)
     info_print("Command: %s", command);
     info_print("Server Name: %s", server_name);
 #endif
-    //server_name = "::1";
     struct addrinfo *result = 0;
     struct addrinfo hints = {0};
     hints.ai_family = AF_UNSPEC;
@@ -345,7 +398,7 @@ int main(const int argc, char **argv)
         return 1;
     }
     info_print("Connection established to the server: %s", server_name);
-    char* serverReady = full_recv(sock);
+    char* serverReady = full_recv(sock, 0, NULL);
     if(serverReady == NULL)
     {
         error_print("Failed to receive data from the server");
@@ -358,6 +411,13 @@ int main(const int argc, char **argv)
     {
 
         printf("Login failure\n");
+        close(sock);
+        freeaddrinfo(result);
+        return 1;
+    }
+    if(imap_select_folder(sock, folder) != 0)
+    {
+        printf("Failed to select folder\n");
         close(sock);
         freeaddrinfo(result);
         return 1;
