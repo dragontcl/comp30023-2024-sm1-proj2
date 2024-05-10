@@ -20,7 +20,7 @@
 #define IMAP_PORT 143
 #define IMAP_TLS_PORT 993
 #define END_OF_PACKET "\r\n"
-#define CHUNK_SIZE 512
+#define CHUNK_SIZE 5
 
 void debug_print(const char *format, ...);
 void warning_print(const char *format, ...);
@@ -134,6 +134,19 @@ char *generate_imap_tag() {
     sprintf(tag_buffer, "A%03d", tag_count);
     return tag_buffer;
 }
+char* returnFinalResponse(char* response);
+char* returnFinalResponse(char* response) {
+    char *responseEnd = strrchr(response, '\r');
+    if (responseEnd != NULL) {
+        *responseEnd = '\0';
+        char *lastCarriage = strrchr(response, '\r');
+        *responseEnd = '\r'; // fix original response
+        if(lastCarriage != NULL){
+            return lastCarriage += 2;
+        }
+    }
+    return response;
+}
 char* full_recv(int sock, int tf, const char* tag) ;
 char* full_recv(const int sock, const int tf, const char* tag) {
     char buffer[CHUNK_SIZE];
@@ -151,20 +164,26 @@ char* full_recv(const int sock, const int tf, const char* tag) {
         data = temp;
         memcpy(data + total_received, buffer, received);
         total_received += received;
-        if(tf == 0 && strncmp(data, "* OK", 4) == 0) {
-            // no tag response end
-            if(strstr(buffer, "\r\n") != NULL) {
-                break;
+        char* dataFinal = returnFinalResponse(data);
+        if (tf == 0) {
+            // Non-tagged response check
+            if (strncmp(dataFinal, "* OK", 4) == 0 ||
+                strncmp(dataFinal, "* BAD", 5) == 0 ||
+                strncmp(dataFinal, "* NO", 4) == 0) {
+                if(strstr(buffer, "\r\n") != NULL) {
+                    break;
+                }
             }
-        } else if(tf == 1 && strncmp(data, tag, strlen(tag)) == 0) {
-            // tag response end
-            if(strstr(buffer, "\r\n") != NULL) {
-                break;
+        } else if (tf == 1) {
+            if (strncmp(dataFinal, tag, strlen(tag)) == 0) {
+                if (strncmp(dataFinal + strlen(tag) + 1, "OK", 2) == 0 ||
+                    strncmp(dataFinal + strlen(tag) + 1, "BAD", 3) == 0 ||
+                    strncmp(dataFinal + strlen(tag) + 1, "NO", 2) == 0) {
+                    if(strstr(buffer, "\r\n") != NULL) {
+                        break;
+                    }
+                }
             }
-        }
-        //normal response end
-        if(strstr(buffer, "\r\n") != NULL) {
-            break;
         }
     }
     if (received < 0) {
@@ -174,20 +193,10 @@ char* full_recv(const int sock, const int tf, const char* tag) {
     if (data != NULL) {
         data[total_received] = '\0';
     }
+    debug_print("RECV: %s", data);
     return data;
 }
-char* returnFinalResponse(char* response);
-char* returnFinalResponse(char* response) {
-    char *responseEnd = strrchr(response, '\r');
-    if (responseEnd != NULL) {
-        *responseEnd = '\0';
-        char *lastCarriage = strrchr(response, '\r');
-        if(lastCarriage != NULL){
-            return lastCarriage += 2;
-        }
-    }
-    return response;
-}
+
 int imap_authenticate_plain(int sock, const char *username, const char *password);
 int imap_authenticate_plain(const int sock, const char *username, const char *password) {
     const size_t ulen = strlen(username);
@@ -274,6 +283,38 @@ int imap_select_folder(const int sock, const char *folder)
         debug_print("Folder selection successful");
         result = 0; // Successful folder selection
     }
+    info_print("%s", response);
+    free(response);
+    return result;
+}
+int imap_fetch_message(int sock, const char *messageNum);
+int imap_fetch_message(const int sock, const char *messageNum) {
+    const char *tag = generate_imap_tag();
+    char *command = malloc(strlen(tag) + strlen(" FETCH ") + strlen(messageNum) + strlen(" BODY.PEEK[]") + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return -1;
+    }
+    sprintf(command, "%s FETCH %s BODY.PEEK[]%s", tag, messageNum, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0) {
+        error_print("Failed to send FETCH command");
+        return -1;
+    }
+    char *response = full_recv(sock, 1, (char*)tag);
+    if(response == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return -1;
+    }
+    int result = -1; // Default to failure
+    //const char* finalResponse = returnFinalResponse(response);
+    //if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+    //    debug_print("Message fetch successful");
+    //    result = 0; // Successful message fetch
+    //}
     info_print("%s", response);
     free(response);
     return result;
@@ -422,7 +463,7 @@ int main(const int argc, char **argv)
         freeaddrinfo(result);
         return 1;
     }
-
+    imap_fetch_message(sock, messageNum);
     close(sock);
     freeaddrinfo(result);
     return 0;
