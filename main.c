@@ -20,7 +20,7 @@
 #define IMAP_PORT 143
 #define IMAP_TLS_PORT 993
 #define END_OF_PACKET "\r\n"
-#define CHUNK_SIZE 5
+#define CHUNK_SIZE 1024
 
 void debug_print(const char *format, ...);
 void warning_print(const char *format, ...);
@@ -310,11 +310,11 @@ int imap_fetch_message(const int sock, const char *messageNum) {
         return -1;
     }
     int result = -1; // Default to failure
-    //const char* finalResponse = returnFinalResponse(response);
-    //if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
-    //    debug_print("Message fetch successful");
-    //    result = 0; // Successful message fetch
-    //}
+    const char* finalResponse = returnFinalResponse(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Message fetch successful");
+        result = 0; // Successful message fetch
+    }
     info_print("%s", response);
     free(response);
     return result;
@@ -458,12 +458,18 @@ int main(const int argc, char **argv)
     }
     if(imap_select_folder(sock, folder) != 0)
     {
-        printf("Failed to select folder\n");
+        printf("Folder not found\n");
         close(sock);
         freeaddrinfo(result);
         return 1;
     }
-    imap_fetch_message(sock, messageNum);
+    if(imap_fetch_message(sock, messageNum) != 0)
+    {
+        printf("Message not found\n");
+        close(sock);
+        freeaddrinfo(result);
+        return 1;
+    }
     close(sock);
     freeaddrinfo(result);
     return 0;
