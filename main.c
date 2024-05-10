@@ -7,11 +7,10 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include<stdarg.h>
+#include <stdarg.h>
 #include <arpa/inet.h>
-
 #include <unistd.h>
-
+#include <openssl/evp.h>
 #define ERROR  "\x1B[31m"
 #define SUCCESS  "\x1B[32m"
 #define WARNING  "\x1B[33m"
@@ -20,8 +19,16 @@
 #define INFO "\x1B[35m"
 #define IMAP_PORT 143
 #define IMAP_TLS_PORT 993
+#define END_OF_PACKET "\r\n"
+#define CHUNK_SIZE 512
 
-void debugPrint(const char *format, ...) {
+void debug_print(const char *format, ...);
+void warning_print(const char *format, ...);
+void error_print(const char *format, ...);
+void info_print(const char *format, ...);
+void print_usage();
+struct addrinfo* reverse_addrinfo(struct addrinfo* head);
+void debug_print(const char *format, ...) {
 #ifndef NDEBUG
     va_list args;
     va_start(args, format);
@@ -31,7 +38,7 @@ void debugPrint(const char *format, ...) {
     printf("%s\n", NORMAL);
 #endif
 }
-void warningPrint(const char *format, ...)
+void warning_print(const char *format, ...)
 {
 #ifndef NDEBUG
     va_list args;
@@ -42,7 +49,7 @@ void warningPrint(const char *format, ...)
     printf("%s\n", NORMAL);
 #endif
 }
-void errorPrint(const char *format, ...) {
+void error_print(const char *format, ...) {
     va_list args;
     va_start(args, format);
     fprintf(stderr, "%s[ERROR]", ERROR);
@@ -50,7 +57,7 @@ void errorPrint(const char *format, ...) {
     va_end(args);
     fprintf(stderr, "%s\n", NORMAL);
 }
-void infoPrint(const char *format, ...) {
+void info_print(const char *format, ...) {
     va_list args;
     va_start(args, format);
     printf("%s[INFO]", INFO);
@@ -61,24 +68,7 @@ void infoPrint(const char *format, ...) {
 void print_usage() {
     fprintf(stderr, "Usage: fetchmail -u <username> -p <password> [-f <folder>] [-n <messageNum>] [-t] <command> <server_name>\n");
 }
-char* ipStringFromAddr(const struct sockaddr *addr, char* dst, const int size) {
-    switch (addr->sa_family) {
-        case AF_INET:
-            if (inet_ntop(AF_INET, &((struct sockaddr_in *)addr)->sin_addr, dst, size) != NULL) {
-                return dst;
-            }
-            break;
-        case AF_INET6:
-            if (inet_ntop(AF_INET6, &((struct sockaddr_in6 *)addr)->sin6_addr, dst, size) != NULL) {
-                return dst;
-            }
-            break;
-        default:
-            break;
-    }
-    return NULL;
-}
-struct addrinfo* reverseList(struct addrinfo* head) {
+struct addrinfo* reverse_addrinfo(struct addrinfo* head) {
     struct addrinfo *prev = NULL;
     struct addrinfo *current = head;
     struct addrinfo *next = NULL;
@@ -91,106 +81,192 @@ struct addrinfo* reverseList(struct addrinfo* head) {
     head = prev;
     return head;
 }
-int main(const int argc, char **argv)
-{
-    char *username = NULL;
-    char *password = NULL;
-    char *folder = NULL;
-    char *messageNum = NULL;
-    char *command = NULL;
-    int tflag = 0;
+void parse_args(int argc, char *argv[], char **username, char **password, char **folder, char **messageNum, char **command, char **server_name, int *tflag);
+void parse_args(const int argc, char *argv[], char **username, char **password, char **folder, char **messageNum, char **command, char **server_name, int *tflag) {
     int opt;
-    int command_index;
-    int server_index;
-    //default server name
-#ifdef NDEBUG
-    char *server_name = NULL;
-#else
-    //char *server_name = "unimelb-comp30023-2024.cloud.edu.au";
-    char *server_name = "127.0.0.1";
-#endif
-    //parse the command line arguments
-#ifdef NDEBUG
     while ((opt = getopt(argc, argv, "u:p:f:n:t")) != -1) {
         switch (opt) {
         case 'u':
-            username = optarg;
+            *username = optarg;
             break;
         case 'p':
-            password = optarg;
+            *password = optarg;
             break;
         case 'f':
-            folder = optarg;
+            *folder = optarg;
             break;
         case 'n':
-            messageNum = optarg;
+            *messageNum = optarg;
             break;
         case 't':
-            tflag = 1;
+            *tflag = 1;
             break;
         default:
-            errorPrint("Invalid argument provided");
+            error_print("Invalid argument provided");
             print_usage();
-            return 1;
+            exit(EXIT_FAILURE);
         }
     }
-    command_index = optind;
-    server_index = optind + 1;
-    if (!(username && password)) {
-        errorPrint("Username and password are required");
+    if (optind < argc) {
+        *command = argv[optind++];
+        *server_name = argv[optind];
+    }
+}
+char* base64_encode(const char *data, size_t inputLength);
+char* base64_encode(const char *data, const size_t inputLength)
+{
+    const int outputLength = 1 + (inputLength + 2) / 3 * 4;
+    char *output = calloc(outputLength, sizeof(char));
+    const int outlen = EVP_EncodeBlock((unsigned char *)output, (unsigned char *)data, inputLength);
+    if(outlen == -1)
+    {
+        error_print("Failed to b64 encode :%s | %s",data, strerror(errno));
+        free(output);
+        return NULL;
+    }
+    return output;
+}
+char *generate_imap_tag();
+char *generate_imap_tag() {
+    static int tag_count = 0;
+    static char tag_buffer[20];
+    tag_count++;
+    sprintf(tag_buffer, "A%03d", tag_count);
+    return tag_buffer;
+}
+char* full_recv(const int sock);
+char* full_recv(const int sock) {
+    char buffer[CHUNK_SIZE];
+    char *data = NULL;
+    int received = 0;
+    int total_received = 0;  // Total bytes received.
+    while((received = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
+        buffer[received] = '\0';
+        char *temp = realloc(data, total_received + received + 1);
+        if (temp == NULL) {
+            free(data);
+            fprintf(stderr, "Memory allocation failed\n");
+            return NULL;
+        }
+        data = temp;
+        memcpy(data + total_received, buffer, received);
+        total_received += received;
+        if(strstr(buffer, "\r\n") != NULL) {
+            char *delim_pos = strstr(data, "\r\n");
+            if (delim_pos != NULL) {
+                *delim_pos = '\0';
+                total_received = delim_pos - data;
+            }
+            break;
+        }
+    }
+    // server closed the connection or an error occurred
+    if (received < 0) {
+        free(data);
+        return NULL;
+    }
+    if (data != NULL) {
+        data[total_received] = '\0';
+    }
+
+    return data;
+}
+int imap_authenticate_plain(int sock, const char *username, const char *password);
+int imap_authenticate_plain(int sock, const char *username, const char *password) {
+    const size_t ulen = strlen(username);
+    const size_t plen = strlen(password);
+    const size_t total_length = ulen + plen + 2;
+    char *auth_string = malloc(total_length + 1);
+    if (auth_string == NULL) {
+        error_print("Memory allocation failed for auth_string");
+        return -1;
+    }
+    auth_string[0] = '\0';
+    memcpy(auth_string + 1, username, ulen);
+    auth_string[ulen + 1] = '\0';
+    memcpy(auth_string + ulen + 2, password, plen);
+    char *encoded = base64_encode(auth_string, total_length);
+    free(auth_string);
+    if (encoded == NULL) {
+        debug_print("Failed to encode authentication string");
+        return -1;
+    }
+    debug_print("Encoded login string: %s", encoded);
+    const char* tag = generate_imap_tag();
+    char *command = malloc(strlen(tag) + strlen(encoded) + strlen(" AUTHENTICATE PLAIN ") + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        free(encoded);
+        return -1;
+    }
+    sprintf(command, "%s AUTHENTICATE PLAIN %s%s", tag ,encoded, END_OF_PACKET);
+    free(encoded);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0){
+        error_print("Failed to send authentication command");
+        return -1;
+    }
+    char *response = full_recv(sock);
+    if(response == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return -1;
+    }
+    int result = -1; // Default to failure
+    if (strncmp(response, tag, strlen(tag)) == 0 && strncmp(response + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("SASL Authentication successful");
+        result = 0; // Successful authentication
+    }
+    info_print("%s", response);
+    free(response);
+    return result;
+}
+
+int main(const int argc, char **argv)
+{
+    char *username = NULL, *password = NULL, *folder = NULL, *messageNum = NULL, *command = NULL, *server_name = NULL;
+    int tflag = 0;
+    parse_args(argc, argv, &username, &password, &folder, &messageNum, &command, &server_name, &tflag);
+    if (username == NULL|| password == NULL) {
+        error_print("Username and password are required");
         print_usage();
         exit(EXIT_FAILURE);
     }
-    infoPrint("Username: %s", username);
-    infoPrint("Password: %s", password);
-    if (folder) {
-        infoPrint("Folder: %s", folder);
-    }
-    if (messageNum) {
-        infoPrint("Message Number: %s", messageNum);
-    }
-    if(tflag) {
-        infoPrint("TLS Enabled");
-    }
-    if (command_index >= argc) {
-        errorPrint("No command provided");
+    if (command == NULL|| server_name == NULL) {
+        error_print("Command and server name are required");
         print_usage();
         exit(EXIT_FAILURE);
     }
-    if (server_index >= argc) {
-        errorPrint("No server name provided");
-        print_usage();
-        exit(EXIT_FAILURE);
-    }
-    command = argv[command_index];
-    server_name = argv[server_index];
-    infoPrint("Command: %s", command);
-    infoPrint("Server Name: %s", server_name);
+#ifndef NDEBUG
+    info_print("Username: %s", username);
+    info_print("Password: %s", password);
+    info_print("Folder: %s", folder);
+    info_print("Message Number: %s", messageNum);
+    info_print("Command: %s", command);
+    info_print("Server Name: %s", server_name);
+    info_print("TLS Flag: %d", tflag);
+    info_print("Command: %s", command);
+    info_print("Server Name: %s", server_name);
 #endif
+    //server_name = "::1";
     struct addrinfo *result = 0;
     struct addrinfo hints = {0};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
-#ifndef NDEBUG
-    debugPrint("Attempting to resolve IPs for %s", server_name);
-    if (getaddrinfo(server_name, NULL, &hints, &result))
-    {
-        errorPrint("getaddrinfo failed to resolve: %s", strerror(errno));
+    debug_print("Attempting to resolve IPs for %s", server_name);
+    if (getaddrinfo(server_name, NULL, &hints, &result)){
+        error_print("getaddrinfo failed to resolve: %s", strerror(errno));
         return 1;
     }
-#else
-    if (getaddrinfo(argv[1], NULL, &hints, &result)){
-        errorPrint("getaddrinfo failed to resolve: %s", strerror(errno));
-        return 1;
-    }
-#endif
     if(result == NULL){
-        errorPrint("Failed to get address info");
+        error_print("Failed to get address info");
         return 1;
     }
     //print the resolved IP protocol if IPV4 or IPV6 or based on the family
-    const struct addrinfo *reversed = reverseList(result);
+    const struct addrinfo *reversed = reverse_addrinfo(result);
 #ifndef NDEBUG
     //print resolved IP addresses
     for(const struct addrinfo *addr = reversed; addr != NULL; addr = addr->ai_next)
@@ -200,20 +276,20 @@ int main(const int argc, char **argv)
         {
         case AF_INET:
             if (inet_ntop(AF_INET, &((struct sockaddr_in *)addr->ai_addr)->sin_addr, dst, sizeof(dst)) != NULL){
-                infoPrint("Resolved IPv4 address: %s", dst);
+                info_print("Resolved IPv4 address: %s", dst);
             } else {
-                errorPrint("inet_ntop failed to convert: %s", strerror(errno));
+                error_print("inet_ntop failed to convert: %s", strerror(errno));
             }
             break;
         case AF_INET6:
             if (inet_ntop(AF_INET6, &((struct sockaddr_in6 *)addr->ai_addr)->sin6_addr, dst, sizeof(dst)) != NULL) {
-                infoPrint("Resolved IPv6 address: %s", dst);
+                info_print("Resolved IPv6 address: %s", dst);
             } else {
-                errorPrint("inet_ntop failed to convert: %s", strerror(errno));
+                error_print("inet_ntop failed to convert: %s", strerror(errno));
             }
             break;
         default:
-            errorPrint("Unknown ai_family: %d", addr->ai_family);
+            error_print("Unknown ai_family: %d", addr->ai_family);
             return 1;
             break;
         }
@@ -221,7 +297,7 @@ int main(const int argc, char **argv)
 #endif
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
-        errorPrint("Unknown ai_family: %d", reversed->ai_family);
+        error_print("Unknown ai_family: %d", reversed->ai_family);
         return 1;
     }
     int sock = -1;
@@ -229,20 +305,20 @@ int main(const int argc, char **argv)
     int fallback = 0;
     for(const struct addrinfo *addr = reversed; addr != NULL; addr = addr->ai_next)
     {
-        debugPrint("Attemping to creating Socket");
+        debug_print("Attemping to creating Socket");
         sock = socket(reversed->ai_family, reversed->ai_socktype, reversed->ai_protocol);
         if (sock < 0) {
-            warningPrint("Socket creation failed: %s", strerror(errno));
+            warning_print("Socket creation failed: %s", strerror(errno));
             continue;
         }
-        debugPrint("Socket created successfully");
-        debugPrint("Setting IMAP port of sockaddr: %d", tflag ? IMAP_TLS_PORT : IMAP_PORT);
+        debug_print("Socket created successfully");
+        debug_print("Setting IMAP port of sockaddr: %d", tflag ? IMAP_TLS_PORT : IMAP_PORT);
         switch (addr->ai_family)
         {
             case AF_INET:
                 if(fallback == 0)
                 {
-                    warningPrint("Failed to connect via IPV6 falling back to IPV4");
+                    warning_print("Failed to connect via IPV6 falling back to IPV4");
                     fallback = 1;
                 }
                 ((struct sockaddr_in *)reversed->ai_addr)->sin_port = htons(tflag ? IMAP_TLS_PORT : IMAP_PORT);
@@ -251,13 +327,13 @@ int main(const int argc, char **argv)
                 ((struct sockaddr_in6 *)reversed->ai_addr)->sin6_port = htons(tflag ? IMAP_TLS_PORT : IMAP_PORT);
                 break;
             default:
-                errorPrint("Unknown ai_family: %d", addr->ai_family);
+                error_print("Unknown ai_family: %d", addr->ai_family);
                 continue;
         }
-        debugPrint("Attempting to connect to the server");
+        debug_print("Attempting to connect to the server");
         connected = connect(sock, reversed->ai_addr, reversed->ai_addrlen);
         if (connected < 0) {
-            warningPrint("Failed to connect: %s", strerror(errno));
+            warning_print("Failed to connect: %s", strerror(errno));
             close(sock);
             continue;
         }
@@ -265,10 +341,29 @@ int main(const int argc, char **argv)
     }
     if(connected == -1)
     {
-        errorPrint("Failed to connect to the server: %s", server_name);
+        error_print("Failed to connect to the server: %s", server_name);
         return 1;
     }
-    infoPrint("Connection established to the server: %s", server_name);
+    info_print("Connection established to the server: %s", server_name);
+    char* serverReady = full_recv(sock);
+    if(serverReady == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return 1;
+    }
+    info_print("Server ready: %s", serverReady);
+    free(serverReady);
+    debug_print("Attempting to authenticate with SASL PLAIN");
+    if(imap_authenticate_plain(sock, username, password) != 0)
+    {
 
+        printf("Login failure\n");
+        close(sock);
+        freeaddrinfo(result);
+        return 1;
+    }
+
+    close(sock);
+    freeaddrinfo(result);
     return 0;
 }
