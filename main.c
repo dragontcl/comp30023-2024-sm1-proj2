@@ -61,6 +61,23 @@ void infoPrint(const char *format, ...) {
 void print_usage() {
     fprintf(stderr, "Usage: fetchmail -u <username> -p <password> [-f <folder>] [-n <messageNum>] [-t] <command> <server_name>\n");
 }
+char* ipStringFromAddr(const struct sockaddr *addr, char* dst, const int size) {
+    switch (addr->sa_family) {
+        case AF_INET:
+            if (inet_ntop(AF_INET, &((struct sockaddr_in *)addr)->sin_addr, dst, size) != NULL) {
+                return dst;
+            }
+            break;
+        case AF_INET6:
+            if (inet_ntop(AF_INET6, &((struct sockaddr_in6 *)addr)->sin6_addr, dst, size) != NULL) {
+                return dst;
+            }
+            break;
+        default:
+            break;
+    }
+    return NULL;
+}
 struct addrinfo* reverseList(struct addrinfo* head) {
     struct addrinfo *prev = NULL;
     struct addrinfo *current = head;
@@ -89,7 +106,8 @@ int main(const int argc, char **argv)
 #ifdef NDEBUG
     char *server_name = NULL;
 #else
-    char *server_name = "unimelb-comp30023-2024.cloud.edu.au";
+    //char *server_name = "unimelb-comp30023-2024.cloud.edu.au";
+    char *server_name = "127.0.0.1";
 #endif
     //parse the command line arguments
 #ifdef NDEBUG
@@ -149,35 +167,25 @@ int main(const int argc, char **argv)
     infoPrint("Command: %s", command);
     infoPrint("Server Name: %s", server_name);
 #endif
-    debugPrint("Attempting to create Socket");
-    const int ipv4Socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    const int ipv6Socket = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
-    if(ipv4Socket == -1 || ipv6Socket == -1)
-    {
-        errorPrint("Failed to create socket: ", strerror(errno));
-        return 1;
-    }
-    debugPrint("Created Socket Successfully");
     struct addrinfo *result = 0;
     struct addrinfo hints = {0};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
 #ifndef NDEBUG
-    if (getaddrinfo(UNIMELB_IMAP_TEST_SERVER, NULL, &hints, &result))
+    debugPrint("Attempting to resolve IPs for %s", server_name);
+    if (getaddrinfo(server_name, NULL, &hints, &result))
     {
         errorPrint("getaddrinfo failed to resolve: %s", strerror(errno));
         return 1;
     }
 #else
-    if (getaddrinfo(argv[1], NULL, &hints, &result))
-    {
+    if (getaddrinfo(argv[1], NULL, &hints, &result)){
         errorPrint("getaddrinfo failed to resolve: %s", strerror(errno));
         return 1;
     }
 #endif
-    if(result == NULL)
-    {
+    if(result == NULL){
         errorPrint("Failed to get address info");
         return 1;
     }
@@ -190,23 +198,23 @@ int main(const int argc, char **argv)
         char dst[1024];
         switch(addr->ai_family)
         {
-            case AF_INET:
-                if (inet_ntop(AF_INET, &((struct sockaddr_in *)addr->ai_addr)->sin_addr, dst, sizeof(dst)) != NULL){
-                    debugPrint("Resolved IPv4 address: %s", dst);
-                } else {
-                    errorPrint("inet_ntop failed to convert: %s", strerror(errno));
-                }
+        case AF_INET:
+            if (inet_ntop(AF_INET, &((struct sockaddr_in *)addr->ai_addr)->sin_addr, dst, sizeof(dst)) != NULL){
+                infoPrint("Resolved IPv4 address: %s", dst);
+            } else {
+                errorPrint("inet_ntop failed to convert: %s", strerror(errno));
+            }
             break;
-            case AF_INET6:
-                if (inet_ntop(AF_INET6, &((struct sockaddr_in6 *)addr->ai_addr)->sin6_addr, dst, sizeof(dst)) != NULL) {
-                    debugPrint("Resolved IPv6 address: %s", dst);
-                } else {
-                    errorPrint("inet_ntop failed to convert: %s", strerror(errno));
-                }
+        case AF_INET6:
+            if (inet_ntop(AF_INET6, &((struct sockaddr_in6 *)addr->ai_addr)->sin6_addr, dst, sizeof(dst)) != NULL) {
+                infoPrint("Resolved IPv6 address: %s", dst);
+            } else {
+                errorPrint("inet_ntop failed to convert: %s", strerror(errno));
+            }
             break;
-            default:
-                errorPrint("Unknown ai_family: %d", addr->ai_family);
-                return 1;
+        default:
+            errorPrint("Unknown ai_family: %d", addr->ai_family);
+            return 1;
             break;
         }
     }
@@ -216,15 +224,51 @@ int main(const int argc, char **argv)
         errorPrint("Unknown ai_family: %d", reversed->ai_family);
         return 1;
     }
-    //attempt to connect to the resolved IP address
+    int sock = -1;
+    int connected = -1;
     int fallback = 0;
     for(const struct addrinfo *addr = reversed; addr != NULL; addr = addr->ai_next)
     {
-        if(addr->ai_family != AF_INET6 && fallback == 0)
-        {
-            warningPrint("Unable to connect to IPv6 address, falling back to IPv4");
-            fallback = 1;
+        debugPrint("Attemping to creating Socket");
+        sock = socket(reversed->ai_family, reversed->ai_socktype, reversed->ai_protocol);
+        if (sock < 0) {
+            warningPrint("Socket creation failed: %s", strerror(errno));
+            continue;
         }
+        debugPrint("Socket created successfully");
+        debugPrint("Setting IMAP port of sockaddr: %d", tflag ? IMAP_TLS_PORT : IMAP_PORT);
+        switch (addr->ai_family)
+        {
+            case AF_INET:
+                if(fallback == 0)
+                {
+                    warningPrint("Failed to connect via IPV6 falling back to IPV4");
+                    fallback = 1;
+                }
+                ((struct sockaddr_in *)reversed->ai_addr)->sin_port = htons(tflag ? IMAP_TLS_PORT : IMAP_PORT);
+                break;
+            case AF_INET6:
+                ((struct sockaddr_in6 *)reversed->ai_addr)->sin6_port = htons(tflag ? IMAP_TLS_PORT : IMAP_PORT);
+                break;
+            default:
+                errorPrint("Unknown ai_family: %d", addr->ai_family);
+                continue;
+        }
+        debugPrint("Attempting to connect to the server");
+        connected = connect(sock, reversed->ai_addr, reversed->ai_addrlen);
+        if (connected < 0) {
+            warningPrint("Failed to connect: %s", strerror(errno));
+            close(sock);
+            continue;
+        }
+        break;
     }
+    if(connected == -1)
+    {
+        errorPrint("Failed to connect to the server: %s", server_name);
+        return 1;
+    }
+    infoPrint("Connection established to the server: %s", server_name);
+
     return 0;
 }
