@@ -142,15 +142,17 @@ char* returnFinalResponse(char* response) {
         char *lastCarriage = strrchr(response, '\r');
         *responseEnd = '\r'; // fix original response
         if(lastCarriage != NULL){
-            return lastCarriage += 2;
+            return lastCarriage + 2;
         }
     }
     return response;
 }
+
+
 char* full_recv(int sock, int tf, const char* tag) ;
 char* full_recv(const int sock, const int tf, const char* tag) {
     char buffer[CHUNK_SIZE];
-    char *data = NULL;
+    char *data = malloc(1);
     int received;
     int total_received = 0;
     while((received = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
@@ -161,10 +163,13 @@ char* full_recv(const int sock, const int tf, const char* tag) {
             fprintf(stderr, "Memory allocation failed\n");
             return NULL;
         }
+        memset(temp + total_received, 0, received + 1);
+
         data = temp;
         memcpy(data + total_received, buffer, received);
         total_received += received;
-        char* dataFinal = returnFinalResponse(data);
+        const char* dataFinal = returnFinalResponse(data);
+
         if (tf == 0) {
             // Non-tagged response check
             if (strncmp(dataFinal, "* OK", 4) == 0 ||
