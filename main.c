@@ -1140,7 +1140,6 @@ int main(const int argc, char **argv)
         if (sock < 0) {
             continue;
         }
-        int i = 0;
         switch (addr->ai_family) {
             case AF_INET:
                 if (fallback == 0) {
