@@ -709,6 +709,7 @@ int main(const int argc, char **argv)
     if(connected == -1)
     {
         error_print("Failed to connect to the server: %s", server_name);
+        close(sock);
         freeaddrinfo(result);
         return 2;
     }
@@ -716,6 +717,8 @@ int main(const int argc, char **argv)
     if(serverReady == NULL)
     {
         error_print("Failed to receive data from the server");
+        close(sock);
+        freeaddrinfo(result);
         return 3;
     }
     free(serverReady);
