@@ -662,13 +662,16 @@ int main(const int argc, char **argv)
     }
 
     const struct addrinfo *reversed = reverse_addrinfo(result);
+#ifndef NDEBUG
+    //check number of ips {HOSTNAME IPV6 thing}
     int i2 = 0;
     while(reversed->ai_next != NULL)
     {
         i2++;
         reversed = reversed->ai_next;
     }
-    debug_print("IPs Resolved %d", i2);
+#endif
+
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
         error_print("Unknown ai_family: %d", reversed->ai_family);
