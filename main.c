@@ -663,36 +663,7 @@ int main(const int argc, char **argv)
         error_print("Failed to get address info");
         return 1;
     }
-    //print the resolved IP protocol if IPV4 or IPV6 or based on the family
     const struct addrinfo *reversed = reverse_addrinfo(result);
-#ifndef NDEBUG
-    //print resolved IP addresses
-    for(const struct addrinfo *addr = reversed; addr != NULL; addr = addr->ai_next)
-    {
-        char dst[1024];
-        switch(addr->ai_family)
-        {
-        case AF_INET:
-            if (inet_ntop(AF_INET, &((struct sockaddr_in *)addr->ai_addr)->sin_addr, dst, sizeof(dst)) != NULL){
-                info_print("Resolved IPv4 address: %s", dst);
-            } else {
-                error_print("inet_ntop failed to convert: %s", strerror(errno));
-            }
-            break;
-        case AF_INET6:
-            if (inet_ntop(AF_INET6, &((struct sockaddr_in6 *)addr->ai_addr)->sin6_addr, dst, sizeof(dst)) != NULL) {
-                info_print("Resolved IPv6 address: %s", dst);
-            } else {
-                error_print("inet_ntop failed to convert: %s", strerror(errno));
-            }
-            break;
-        default:
-            error_print("Unknown ai_family: %d", addr->ai_family);
-            return 1;
-            break;
-        }
-    }
-#endif
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
         error_print("Unknown ai_family: %d", reversed->ai_family);
