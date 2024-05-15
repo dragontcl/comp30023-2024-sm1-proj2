@@ -780,12 +780,12 @@ char* extractBodyCTStart(char* emailBody,char* boundaryStart)
     }
     strncpy(contentType, emailBody, headerend - emailBody);
     contentType[headerend - emailBody] = '\0';
-    int t = match_content_type(headerend);
     char* tempEmail = malloc(strlen("Content-Transfer-Encoding: quoted-printable") + 2);
     if (tempEmail == NULL) {
         error_print("Memory allocation failed for tempEmail");
         return NULL;
     }
+    return NULL;
 }
 int mime_parse(const int sock,  char*  messageNum, char** mime)
 {
@@ -982,7 +982,10 @@ int imap_list_email(int sock, const char* folder, char** mailList) {
             }
             else
             {
+                if (temp[strlen(temp) - 1] == '\r') temp[strlen(temp) - 1] = '\0';
+
                 const char *formattedSubject = strchr(temp, ':');
+
                 if(strlen(temp) > 0 && formattedSubject != NULL)
                     formattedSubject++;
                 else
@@ -1070,7 +1073,6 @@ int main(const int argc, char **argv)
                 break;
             default:
                 continue;
-            i++;
         }
         connected = connect(sock, reversed->ai_addr, reversed->ai_addrlen);
         if (connected < 0) {
