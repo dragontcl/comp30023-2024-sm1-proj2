@@ -24,4 +24,30 @@ See FAQ on Ed (Post #512) for more details.
 ./fetchmail -p pass -u test@comp30023 -f Test list unimelb-comp30023-2024.cloud.edu.au | diff - out/list-Test.out
 ./fetchmail -p pass -u test@comp30023 list unimelb-comp30023-2024.cloud.edu.au | diff - out/list-INBOX.out
 
+./fetchmail
+./fetchmail -u
+./fetchmail retrieve
+./fetchmail unimelb-comp30023-2024.cloud.edu.au
+./fetchmail retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -p -u retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -p a -u f -f retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -n 0 -u test@comp30023 -p pass -f Test retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -n -1 -u test@comp30023 -p pass -f Test retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -n 10000000000000000000000000000000000 -u test@comp30023 -p pass -f Test retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -n comp30023 -u test@comp30023 -p pass -f Test retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -n 1 -u test@comp30023 -p pass -f '' retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -n 1 -u test@comp30023 -p pass -f ' ' retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -n 1 -u test@comp30023 -p pass -f '🫤' retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -u f -p a retrieve ''
+./fetchmail -u f -p a retrieve ' '
+./fetchmail -u f -p a retrieve aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+./fetchmail -f Test -p $'pass\r\nCOMP30023 LOGIN inject@comp30023 pass' -u inject@comp30023 -n 1 retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -f Test -p pass -u test@comp30023 -n 1 retrieve <a-server-which-disconnects>
+
 ./fetchmail -f Test -p pass -u test@comp30023 -n 1 -t retrieve unimelb-comp30023-2024.cloud.edu.au | diff - out/ret-ed512.out
+
+./fetchmail -f more -p pass -u test@comp30023 -n 2 retrieve unimelb-comp30023-2024.cloud.edu.au | diff - out/ret-nul.out
+./fetchmail -f more -p pass -u test@comp30023 -n 1 parse unimelb-comp30023-2024.cloud.edu.au | diff - out/parse-mst-tab.out
+./fetchmail -u test@comp30023 -p pass -f Test -n '1:2' retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -u test@comp30023 -p pass -f Test -n $'1\x2c2' retrieve unimelb-comp30023-2024.cloud.edu.au
+./fetchmail -u test@comp30023 -p pass -f Test -n '*' retrieve unimelb-comp30023-2024.cloud.edu.au

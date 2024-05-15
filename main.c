@@ -50,20 +50,24 @@ void warning_print(const char *format, ...)
 #endif
 }
 void error_print(const char *format, ...) {
+#ifndef NDEBUG
     va_list args;
     va_start(args, format);
     fprintf(stderr, "%s[ERROR]", ERROR);
     vfprintf(stderr, format, args);
     va_end(args);
     fprintf(stderr, "%s\n", NORMAL);
+#endif
 }
 void info_print(const char *format, ...) {
+#ifndef NDEBUG
     va_list args;
     va_start(args, format);
     printf("%s[INFO]", INFO);
     vprintf(format, args);
     va_end(args);
     printf("%s\n", NORMAL);
+#endif
 }
 void print_usage() {
     fprintf(stderr, "Usage: fetchmail -u <username> -p <password> [-f <folder>] [-n <messageNum>] [-t] <command> <server_name>\n");
@@ -81,8 +85,8 @@ struct addrinfo* reverse_addrinfo(struct addrinfo* head) {
     head = prev;
     return head;
 }
-void parse_args(int argc, char *argv[], char **username, char **password, char **folder, char **messageNum, char **command, char **server_name, int *tflag);
-void parse_args(const int argc, char *argv[], char **username, char **password, char **folder, char **messageNum, char **command, char **server_name, int *tflag) {
+void parse_args(int argc, char *argv[], char **username, char **password, char **folder, char **messageNum, char **command, char **server_name, int *tflag, int *fflag);
+void parse_args(const int argc, char *argv[], char **username, char **password, char **folder, char **messageNum, char **command, char **server_name, int *tflag, int *fflag) {
     int opt;
     while ((opt = getopt(argc, argv, "u:p:f:n:t")) != -1) {
         switch (opt) {
@@ -93,7 +97,18 @@ void parse_args(const int argc, char *argv[], char **username, char **password, 
             *password = optarg;
             break;
         case 'f':
-            *folder = optarg;
+            if (strchr(optarg, ' ') != NULL) { // Folder name contains space, needs to be quoted
+                *folder = malloc(strlen(optarg) + 3); // Allocate memory for quotes and null terminator
+                if (*folder == NULL) {
+                    perror("Failed to allocate memory");
+                    exit(EXIT_FAILURE);
+                }
+                sprintf(*folder, "\"%s\"", optarg); // Surround the folder name with quotes
+                *fflag = 1;
+            } else {
+                *folder = optarg;
+            }
+            break;
             break;
         case 'n':
             *messageNum = optarg;
@@ -147,8 +162,6 @@ char* returnFinalResponse(char* response) {
     }
     return response;
 }
-
-
 char* full_recv(int sock, int tf, const char* tag) ;
 char* full_recv(const int sock, const int tf, const char* tag) {
     char buffer[CHUNK_SIZE];
@@ -163,13 +176,11 @@ char* full_recv(const int sock, const int tf, const char* tag) {
             fprintf(stderr, "Memory allocation failed\n");
             return NULL;
         }
-        memset(temp + total_received, 0, received + 1);
-
+        memset(temp + total_received, 0, received + 1); //have to initialize realloced heap or valgrind will complain
         data = temp;
         memcpy(data + total_received, buffer, received);
         total_received += received;
         const char* dataFinal = returnFinalResponse(data);
-
         if (tf == 0) {
             // Non-tagged response check
             if (strncmp(dataFinal, "* OK", 4) == 0 ||
@@ -201,7 +212,55 @@ char* full_recv(const int sock, const int tf, const char* tag) {
     debug_print("RECV: %s", data);
     return data;
 }
-
+char* parse_imap_response(const char* response);
+char* parse_imap_response(const char* response) {
+    const char* start = strstr(response, "{")+strlen("{");
+    const char* end = strchr(response, '}');
+    const int length = end - start;
+    char* bufferSizeStr = NULL;
+    int bufferSize = 0;
+    if (start < end) {
+        bufferSizeStr = (char*) malloc(length + 1);
+        if (bufferSizeStr != NULL) {
+            strncpy(bufferSizeStr, start, length);
+            bufferSizeStr[length] = '\0';
+            bufferSize = atoi(bufferSizeStr);
+            free(bufferSizeStr);
+            if(bufferSize == 0){
+                warning_print("No email in body");
+            }
+        } else {
+            error_print("Memory allocation failed");
+            return NULL;
+        }
+    }
+    else{
+        error_print("The required substring could not be found");
+        return NULL;
+    }
+    char* result = (char*)malloc(bufferSize + 1);
+    if (result != NULL) {
+        memcpy(result, end + 3, bufferSize); //have to account for } and \r\n
+        (result)[bufferSize-1] = '\0'; //remove /n only cannot remove /r else no match
+        return result;
+    } else {
+        error_print("Memory allocation failed");
+        return NULL;
+    }
+}
+void removeCRLF(char *str);
+void removeCRLF(char *str) {
+    const char *src = str;
+    char*dst = str;
+    while (*src != '\0') {
+        if (*src == '\r' && *(src + 1) == '\n') {
+            src += 2;  // Skip the \r\n characters
+        } else {
+            *dst++ = *src++;  // Copy the character
+        }
+    }
+    *dst = '\0';  // Null-terminate the modified string
+}
 int imap_authenticate_plain(int sock, const char *username, const char *password);
 int imap_authenticate_plain(const int sock, const char *username, const char *password) {
     const size_t ulen = strlen(username);
@@ -261,6 +320,11 @@ int imap_authenticate_plain(const int sock, const char *username, const char *pa
 int imap_select_folder(int sock, const char *folder);
 int imap_select_folder(const int sock, const char *folder)
 {
+    if(folder == NULL)
+    {
+        error_print("Folder name is required");
+        return -1;
+    }
     const char *tag = generate_imap_tag();
     char *command = malloc(strlen(tag) + strlen(" SELECT ") + strlen(folder) + strlen(END_OF_PACKET) + 1);
     if (command == NULL) {
@@ -292,8 +356,8 @@ int imap_select_folder(const int sock, const char *folder)
     free(response);
     return result;
 }
-int imap_fetch_message(int sock, const char *messageNum);
-int imap_fetch_message(const int sock, const char *messageNum) {
+int imap_fetch_message(int sock, const char *messageNum, char **email);
+int imap_fetch_message(const int sock, const char *messageNum, char **email) {
     const char *tag = generate_imap_tag();
     char *command = malloc(strlen(tag) + strlen(" FETCH ") + strlen(messageNum) + strlen(" BODY.PEEK[]") + strlen(END_OF_PACKET) + 1);
     if (command == NULL) {
@@ -318,17 +382,252 @@ int imap_fetch_message(const int sock, const char *messageNum) {
     const char* finalResponse = returnFinalResponse(response);
     if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
         debug_print("Message fetch successful");
+        *email = parse_imap_response(response);
+        if(*email == NULL)
+        {
+            error_print("Failed to parse the response");
+            return result;
+        }
         result = 0; // Successful message fetch
     }
     info_print("%s", response);
     free(response);
     return result;
 }
+int imap_fetch_message_header_to(int sock, const char *messageNum, char **header);
+int imap_fetch_message_header_to(const int sock, const char *messageNum, char **header)
+{
+    int result = -1;
+    const char *tag = generate_imap_tag();
+    char *command = malloc(strlen(tag) + strlen(" FETCH ") + strlen(messageNum) + strlen(" BODY.PEEK[HEADER.FIELDS (TO)]") + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return result;
+    }
+    sprintf(command, "%s FETCH %s BODY.PEEK[HEADER.FIELDS (TO)]%s", tag, messageNum, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0) {
+        error_print("Failed to send FETCH command");
+        return result;
+    }
+    char *response = full_recv(sock, 1, (char*)tag);
+    if(response == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return result;
+    }
+    const char* finalResponse = returnFinalResponse(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Message fetch successful");
+        *header = parse_imap_response(response);
+        if(*header == NULL)
+        {
+            error_print("Failed to parse the response");
+            return result;
+        }
+        result = 0; // Successful message fetch
+    }
+    removeCRLF(*header);
+    info_print("%s", response);
+    free(response);
+    return result;
+}
+int imap_fetch_message_header_from(int sock, const char *messageNum, char **header);
+int imap_fetch_message_header_from(const int sock, const char *messageNum, char **header)
+{
+    int result = -1;
+    const char *tag = generate_imap_tag();
+    char *command = malloc(strlen(tag) + strlen(" FETCH ") + strlen(messageNum) + strlen(" BODY.PEEK[HEADER.FIELDS (FROM)]") + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return result;
+    }
+    sprintf(command, "%s FETCH %s BODY.PEEK[HEADER.FIELDS (FROM)]%s", tag, messageNum, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0) {
+        error_print("Failed to send FETCH command");
+        return result;
+    }
+    char *response = full_recv(sock, 1, (char*)tag);
+    if(response == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return result;
+    }
+    const char* finalResponse = returnFinalResponse(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Message fetch successful");
+        *header = parse_imap_response(response);
+        if(*header == NULL)
+        {
+            error_print("Failed to parse the response");
+            return result;
+        }
+        result = 0; // Successful message fetch
+    }
+    removeCRLF(*header);
+    info_print("%s", response);
+    free(response);
+    return result;
+}
+int imap_fetch_message_header_date(int sock, const char *messageNum, char **header);
+int imap_fetch_message_header_date(const int sock, const char *messageNum, char **header)
+{
+    int result = -1;
+    const char *tag = generate_imap_tag();
+    char *command = malloc(strlen(tag) + strlen(" FETCH ") + strlen(messageNum) + strlen(" BODY.PEEK[HEADER.FIELDS (DATE)]") + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return result;
+    }
+    sprintf(command, "%s FETCH %s BODY.PEEK[HEADER.FIELDS (DATE)]%s", tag, messageNum, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0) {
+        error_print("Failed to send FETCH command");
+        return result;
+    }
+    char *response = full_recv(sock, 1, (char*)tag);
+    if(response == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return result;
+    }
+    const char* finalResponse = returnFinalResponse(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Message fetch successful");
+        *header = parse_imap_response(response);
+        if(*header == NULL)
+        {
+            error_print("Failed to parse the response");
+            return result;
+        }
+        result = 0; // Successful message fetch
+    }
+    removeCRLF(*header);
+    info_print("%s", response);
+    free(response);
+    return result;
+}
+int imap_fetch_message_header_subject(int sock, const char *messageNum, char **header);
+int imap_fetch_message_header_subject(const int sock, const char *messageNum, char **header)
+{
+    int result = -1;
+    const char *tag = generate_imap_tag();
+    char *command = malloc(strlen(tag) + strlen(" FETCH ") + strlen(messageNum) + strlen(" BODY.PEEK[HEADER.FIELDS (SUBJECT)]") + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return result;
+    }
+    sprintf(command, "%s FETCH %s BODY.PEEK[HEADER.FIELDS (SUBJECT)]%s", tag, messageNum, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0) {
+        error_print("Failed to send FETCH command");
+        return result;
+    }
+    char *response = full_recv(sock, 1, (char*)tag);
+    if(response == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return result;
+    }
+    const char* finalResponse = returnFinalResponse(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Message fetch successful");
+        *header = parse_imap_response(response);
+        if(*header == NULL)
+        {
+            error_print("Failed to parse the response");
+            return result;
+        }
+        result = 0; // Successful message fetch
+    }
+    removeCRLF(*header);
+    info_print("%s", response);
+    free(response);
+    return result;
+}
+int imap_fetch_message_header(int sock, const char *messageNum, char **header);
+int imap_fetch_message_header(const int sock, const char *messageNum, char **header)
+{
+    char *to = NULL, *from = NULL, *date = NULL, *subject = NULL;
+    imap_fetch_message_header_to(sock, messageNum, &to);
+    imap_fetch_message_header_from(sock, messageNum, &from);
+    imap_fetch_message_header_date(sock, messageNum, &date);
+    imap_fetch_message_header_subject(sock, messageNum, &subject);
+    if (!to || !from || !date || !subject) {
+        if (to) free(to);
+        if (from) free(from);
+        if (date) free(date);
+        if (subject) free(subject);
+        return -1;
+    }
+    // BUG FIX
+    if (to[strlen(to) - 1] == '\r') to[strlen(to) - 1] = '\0';
+    if (from[strlen(from) - 1] == '\r') from[strlen(from) - 1] = '\0';
+    if (date[strlen(date) - 1] == '\r') date[strlen(date) - 1] = '\0';
+    if (subject[strlen(subject) - 1] == '\r') subject[strlen(subject) - 1] = '\0';
+    const char *fromattedTo = strchr(to, ':');
+    const char *fromattedFrom = strchr(from, ':');
+    const char *fromattedDate = strchr(date, ':');
+    if (fromattedTo == NULL)
+        fromattedTo = to;
+    else
+        fromattedTo++;
+    if (fromattedFrom == NULL)
+        fromattedFrom = to;
+    else
+        fromattedFrom++;
+    if (fromattedDate == NULL)
+        fromattedDate = to;
+    else
+        fromattedDate++;
+    const char *formattedSubject = strchr(subject, ':');
+    if(strlen(subject) > 0 && formattedSubject != NULL)
+        formattedSubject++;
+    else
+        formattedSubject = " <No subject>";
+    // Calculate total length for final header, 5 = 4\n and 1\0
+    const size_t length = strlen("From:")+strlen(fromattedTo) + strlen("To:")+strlen(fromattedFrom) +strlen("Date:")+ strlen(fromattedDate) + strlen("Subject:") + strlen(formattedSubject) + 5;
+    *header = malloc(length);
+    if (*header == NULL) {
+        free(to); free(from); free(date); free(subject);
+        return -1;
+    }
+    // Format the final header string
+    snprintf(*header, length, "From:%s\nTo:%s\nDate:%s\nSubject:%s", fromattedFrom, fromattedTo, fromattedDate, formattedSubject);
+    // Cleanup
+    free(to);
+    free(from);
+    free(date);
+    free(subject);
+    debug_print(*header);
+    return 0;
+}
+int mime_parse(char* content, char** mime);
+int mime_parse(char* content, char** mime)
+{
+    // find the start of mime
+    const char* mimeStart = strstr(content, "Content-Type: text/plain; charset=UTF-8");
+    if(mimeStart == NULL)
+    {
+        return 4;
+    }
+    printf("%s",content);
+    return 0;
+}
 int main(const int argc, char **argv)
 {
     char *username = NULL, *password = NULL, *folder = NULL, *messageNum = NULL, *command = NULL, *server_name = NULL;
-    int tflag = 0;
-    parse_args(argc, argv, &username, &password, &folder, &messageNum, &command, &server_name, &tflag);
+    int tflag = 0, fflag = 0;
+    parse_args(argc, argv, &username, &password, &folder, &messageNum, &command, &server_name, &tflag, &fflag);
     if (username == NULL|| password == NULL) {
         error_print("Username and password are required");
         print_usage();
@@ -463,17 +762,64 @@ int main(const int argc, char **argv)
     }
     if(imap_select_folder(sock, folder) != 0)
     {
-        printf("Folder not found\n");
-        close(sock);
-        freeaddrinfo(result);
-        return 1;
+       // printf("Folder not found\n");
+        //close(sock);
+        //freeaddrinfo(result);
+        //return 1;
     }
-    if(imap_fetch_message(sock, messageNum) != 0)
+    if(strcmp(command, "retrieve") == 0)
     {
-        printf("Message not found\n");
-        close(sock);
-        freeaddrinfo(result);
-        return 1;
+        char* email = NULL;
+        if(imap_fetch_message(sock, messageNum, &email) != 0)
+        {
+            printf("Message not found\n");
+            close(sock);
+            freeaddrinfo(result);
+            return 1;
+        }
+        printf("%s\n",email);
+        free(email);
+    }
+    if(strcmp(command, "parse") == 0)
+    {
+        char* header = NULL;
+        if(imap_fetch_message_header(sock, messageNum, &header) != 0)
+        {
+            printf("Header not found\n");
+            close(sock);
+            freeaddrinfo(result);
+            return 1;
+        }
+        printf("%s\n",header);
+        free(header);
+    }
+    if(strcmp(command, "mime") == 0)
+    {
+        char* email = NULL;
+        char* mime = NULL;
+        if(imap_fetch_message(sock, messageNum, &email) != 0)
+        {
+            printf("Message not found\n");
+            close(sock);
+            freeaddrinfo(result);
+            return 1;
+        }
+        int i;
+        if((i = mime_parse(email, &mime) != 0))
+        {
+            close(sock);
+            freeaddrinfo(result);
+            if(i == 4)
+            {
+                error_print("Failed to parse MIME, UTF-8 text/plain part not found ");
+            }
+            else
+            {
+                error_print("Failed to parse MIME, GENERIC");
+            }
+            return i;
+        }
+        free(email);
     }
     close(sock);
     freeaddrinfo(result);
