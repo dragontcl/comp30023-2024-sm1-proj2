@@ -652,7 +652,6 @@ int main(const int argc, char **argv)
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     debug_print("Attempting to resolve IPs for %s", server_name);
-    server_name = "localhost";
     if (getaddrinfo(server_name, NULL, &hints, &result)){
         error_print("getaddrinfo failed to resolve: %s", strerror(errno));
         return 1;

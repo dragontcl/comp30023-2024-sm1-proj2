@@ -12,8 +12,8 @@ all: CFLAGS += $(DFLAGS)
 all: LDFLAGS += $(OPENSSL_LIBS)
 all: $(EXE)
 
-# debug: LDFLAGS += $(OPENSSL_LIBS)
-# debug: $(DEBUG_EXE)
+debug: LDFLAGS += $(OPENSSL_LIBS)
+debug: $(DEBUG_EXE)
 
 
 # The executable
