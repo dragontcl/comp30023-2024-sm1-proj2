@@ -645,14 +645,8 @@ int main(const int argc, char **argv)
     hints.ai_protocol = IPPROTO_TCP;
     debug_print("Attempting to resolve IPs for %s", server_name);
     /////// FIRST CALL FOR GETADDRINFO ////////
-    if (getaddrinfo(server_name, NULL, &hints, &result)) {
-        error_print("getaddrinfo failed to resolve: %s", strerror(errno));
-        freeaddrinfo(result);  // Free result here
-        return 2;
-    }
-    if (result == NULL) {
-        error_print("Failed to get address info");
-        freeaddrinfo(result);  // Free result here
+    const int s  = getaddrinfo(server_name, NULL, &hints, &result);
+    if (s != 0) {
         return 2;
     }
     const struct addrinfo *reversed = reverse_addrinfo(result);
@@ -741,17 +735,7 @@ int main(const int argc, char **argv)
         printf("%s\n", email);
         free(email);  // Free email here
     }
-    if (strcmp(command, "parse") == 0) {
-        char* header = NULL;
-        if (imap_fetch_message_header(sock, messageNum, &header) != 0) {
-            printf("Header not found\n");
-            close(sock);
-            freeaddrinfo(result);  // Free result here
-            return 1;
-        }
-        printf("%s\n", header);
-        free(header);  // Free header here
-    }
+
     close(sock);
     freeaddrinfo(result);  // Free result here
     return 0;
