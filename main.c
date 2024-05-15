@@ -644,6 +644,7 @@ int main(const int argc, char **argv)
     debug_print("Attempting to resolve IPs for %s", server_name);
     if (getaddrinfo(server_name, NULL, &hints, &result)){
         error_print("getaddrinfo failed to resolve: %s", strerror(errno));
+        freeaddrinfo(result);
         return 2;
     }
     if(result == NULL){
