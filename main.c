@@ -656,11 +656,11 @@ int main(const int argc, char **argv)
     debug_print("Attempting to resolve IPs for %s", server_name);
     if (getaddrinfo(server_name, NULL, &hints, &result)){
         error_print("getaddrinfo failed to resolve: %s", strerror(errno));
-        return 1;
+        return 2;
     }
     if(result == NULL){
         error_print("Failed to get address info");
-        return 1;
+        return 2;
     }
 
     const struct addrinfo *reversed = reverse_addrinfo(result);
@@ -676,7 +676,7 @@ int main(const int argc, char **argv)
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
         error_print("Unknown ai_family: %d", reversed->ai_family);
-        return 1;
+        return 2;
     }
     int sock = -1;
     int connected = -1;
@@ -723,13 +723,13 @@ int main(const int argc, char **argv)
     if(connected == -1)
     {
         error_print("Failed to connect to the server: %s", server_name);
-        return 1;
+        return 2;
     }
     char* serverReady = full_recv(sock, 0, NULL);
     if(serverReady == NULL)
     {
         error_print("Failed to receive data from the server");
-        return 1;
+        return 3; //server issue
     }
     if(imap_authenticate_plain(sock, username, password) != 0)
     {
