@@ -1198,14 +1198,53 @@ int main(const int argc, char **argv)
     }
     if (strcmp(command, "retrieve") == 0) {
         char* email = NULL;
-        if (imap_fetch_message(sock, messageNum, &email) != 0) {
-            printf("Message not found\n");
-            close(sock);
-            freeaddrinfo(result);
-            return 3;
+        int min = 0;
+        int max = 0;
+
+        if (sscanf(messageNum, "%d:%d", &min, &max) == 2)
+        {
+            for(int i = min; i<max +1; i++)
+            {
+                char str[20]; // no way u have more tha 1 mil emaik
+                sprintf(str, "%d", i);
+                if(imap_fetch_message(sock, messageNum, &email) != 0) {
+                    printf("Message not found\n");
+                    close(sock);
+                    freeaddrinfo(result);
+                    return 3;
+                }
+                printf("%s\n", email);
+                free(email);
+            }
+
         }
-        printf("%s\n", email);
-        free(email);
+        else if (sscanf(messageNum, "%d\x2c%d", &min, &max) == 2){
+            for(int i = min; i<max +1; i++)
+            {
+                char str[20]; // no way u have more tha 1 mil emaik
+                sprintf(str, "%d", i);
+                if(imap_fetch_message(sock, messageNum, &email) != 0) {
+                    printf("Message not found\n");
+                    close(sock);
+                    freeaddrinfo(result);
+                    return 3;
+                }
+                printf("%s\n", email);
+                free(email);
+            }
+        }
+        else
+        {
+            if(imap_fetch_message(sock, messageNum, &email) != 0) {
+                printf("Message not found\n");
+                close(sock);
+                freeaddrinfo(result);
+                return 3;
+            }
+            printf("%s\n", email);
+            free(email);
+        }
+
     }
     if(strcmp(command, "parse") == 0)
     {
