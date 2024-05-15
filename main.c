@@ -50,14 +50,12 @@ void warning_print(const char *format, ...)
 #endif
 }
 void error_print(const char *format, ...) {
-#ifndef NDEBUG
     va_list args;
     va_start(args, format);
     fprintf(stderr, "%s[ERROR]", ERROR);
     vfprintf(stderr, format, args);
     va_end(args);
     fprintf(stderr, "%s\n", NORMAL);
-#endif
 }
 void info_print(const char *format, ...) {
 #ifndef NDEBUG
@@ -656,15 +654,14 @@ int main(const int argc, char **argv)
     debug_print("Attempting to resolve IPs for %s", server_name);
     if (getaddrinfo(server_name, NULL, &hints, &result)){
         error_print("getaddrinfo failed to resolve: %s", strerror(errno));
-        return 2;
+        return 1;
     }
     if(result == NULL){
         error_print("Failed to get address info");
-        return 2;
+        return 1;
     }
 
     const struct addrinfo *reversed = reverse_addrinfo(result);
-#ifndef NDEBUG
     //check number of ips {HOSTNAME IPV6 thing}
     int i2 = 0;
     while(reversed->ai_next != NULL)
@@ -672,11 +669,11 @@ int main(const int argc, char **argv)
         i2++;
         reversed = reversed->ai_next;
     }
-#endif
+
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
         error_print("Unknown ai_family: %d", reversed->ai_family);
-        return 2;
+        return 1;
     }
     int sock = -1;
     int connected = -1;
@@ -723,21 +720,15 @@ int main(const int argc, char **argv)
     if(connected == -1)
     {
         error_print("Failed to connect to the server: %s", server_name);
-        return 2;
+        return 1;
     }
     char* serverReady = full_recv(sock, 0, NULL);
     if(serverReady == NULL)
     {
         error_print("Failed to receive data from the server");
-        return 3; //server issue
+        return 1;
     }
-    if(imap_authenticate_plain(sock, username, password) != 0)
-    {
-        printf("Login failure\n");
-        close(sock);
-        freeaddrinfo(result);
-        return 3;
-    }
+
 
 
     close(sock);
