@@ -1222,24 +1222,24 @@ int main(const int argc, char **argv)
     }
     if(strcmp(command, "mime") == 0)
     {
-        //char* email = NULL;
-        //if (imap_fetch_message(sock, messageNum, &email) != 0) {
-        //    printf("Message not found\n");
-        //    close(sock);
-        //    freeaddrinfo(result);
-        //    return 3;
-        //}
-        //char* mime = NULL;
-        //if(mime_parse(sock,messageNum, &mime) != 0)
-        //{
-        //    printf("Mime not found\n");
-        //    close(sock);
-        //    freeaddrinfo(result);
-        //    return 3;
-        //}
-        //printf("%s", mime);
-        //free(mime);
-        //free(email);
+        char* email = NULL;
+        if (imap_fetch_message(sock, messageNum, &email) != 0) {
+            printf("Message not found\n");
+            close(sock);
+            freeaddrinfo(result);
+            return 3;
+        }
+        char* mime = NULL;
+        if(mime_parse(sock,messageNum, &mime) != 0)
+        {
+            printf("Mime not found\n");
+           close(sock);
+            freeaddrinfo(result);
+            return 3;
+        }
+        printf("%s", mime);
+        free(mime);
+        free(email);
     }
     if(strcmp(command, "list") == 0)
     {
