@@ -8,7 +8,9 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <stdarg.h>
+
 #include <arpa/inet.h>
+
 #include <unistd.h>
 #include <openssl/evp.h>
 #define ERROR  "\x1B[31m"
@@ -147,8 +149,8 @@ char *generate_imap_tag() {
     sprintf(tag_buffer, "A%03d", tag_count);
     return tag_buffer;
 }
-char* returnFinalResponse(char* response);
-char* returnFinalResponse(char* response) {
+char* return_final_response(char* response);
+char* return_final_response(char* response) {
     char *responseEnd = strrchr(response, '\r');
     if (responseEnd != NULL) {
         *responseEnd = '\0';
@@ -178,7 +180,7 @@ char* full_recv(const int sock, const int tf, const char* tag) {
         data = temp;
         memcpy(data + total_received, buffer, received);
         total_received += received;
-        const char* dataFinal = returnFinalResponse(data);
+        const char* dataFinal = return_final_response(data);
         if (tf == 0) {
             // Non-tagged response check
             if (strncmp(dataFinal, "* OK", 4) == 0 ||
@@ -303,7 +305,7 @@ int imap_authenticate_plain(const int sock, const char *username, const char *pa
         return -1;
     }
     int result = -1; // Default to failure
-    const char* finalResponse = returnFinalResponse(response);
+    const char* finalResponse = return_final_response(response);
     if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
         debug_print("Authentication successful.");
         result = 0;  // Success
@@ -344,7 +346,7 @@ int imap_select_folder(const int sock, const char *folder)
         return -1;
     }
     int result = -1; // Default to failure
-    const char* finalResponse = returnFinalResponse(response);
+    const char* finalResponse = return_final_response(response);
 
     if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
         debug_print("Folder selection successful");
@@ -377,7 +379,7 @@ int imap_fetch_message(const int sock, const char *messageNum, char **email) {
         return -1;
     }
     int result = -1; // Default to failure
-    const char* finalResponse = returnFinalResponse(response);
+    const char* finalResponse = return_final_response(response);
     if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
         debug_print("Message fetch successful");
         *email = parse_imap_response(response);
@@ -416,7 +418,7 @@ int imap_fetch_message_header_to(const int sock, const char *messageNum, char **
         error_print("Failed to receive data from the server");
         return result;
     }
-    const char* finalResponse = returnFinalResponse(response);
+    const char* finalResponse = return_final_response(response);
     if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
         debug_print("Message fetch successful");
         *header = parse_imap_response(response);
@@ -456,7 +458,7 @@ int imap_fetch_message_header_from(const int sock, const char *messageNum, char 
         error_print("Failed to receive data from the server");
         return result;
     }
-    const char* finalResponse = returnFinalResponse(response);
+    const char* finalResponse = return_final_response(response);
     if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
         debug_print("Message fetch successful");
         *header = parse_imap_response(response);
@@ -496,7 +498,7 @@ int imap_fetch_message_header_date(const int sock, const char *messageNum, char 
         error_print("Failed to receive data from the server");
         return result;
     }
-    const char* finalResponse = returnFinalResponse(response);
+    const char* finalResponse = return_final_response(response);
     if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
         debug_print("Message fetch successful");
         *header = parse_imap_response(response);
@@ -536,7 +538,7 @@ int imap_fetch_message_header_subject(const int sock, const char *messageNum, ch
         error_print("Failed to receive data from the server");
         return result;
     }
-    const char* finalResponse = returnFinalResponse(response);
+    const char* finalResponse = return_final_response(response);
     if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
         debug_print("Message fetch successful");
         *header = parse_imap_response(response);
@@ -609,16 +611,88 @@ int imap_fetch_message_header(const int sock, const char *messageNum, char **hea
     debug_print(*header);
     return 0;
 }
+char* get_char_substring(const char* str,  char start, char end);
+char* get_char_substring(const char* str, const char start, const char end) {
+    const char *start_ptr = strchr(str, start)+1;
+    if (start_ptr == NULL) {
+        return NULL;
+    }
+    const char *end_ptr = strrchr(str, end)-1;
+    if (end_ptr == NULL || end_ptr <= start_ptr) {
+        return NULL;
+    }
+    const size_t length = end_ptr - start_ptr + 1;
+    char *substring = malloc(length + 1);
+    if (substring == NULL) {
+        return NULL;
+    }
+    strncpy(substring, start_ptr, length);
+    substring[length] = '\0';
+    return substring;
+}
 int mime_parse(char* content, char** mime);
 int mime_parse(char* content, char** mime)
 {
-    // find the start of mime
-    const char* mimeStart = strstr(content, "Content-Type: text/plain; charset=UTF-8");
+    const char* mimeStart = strstr(content, "MIME-Version: 1.0\r\nContent-Type: "); //asume that all MIME headers start with this
     if(mimeStart == NULL)
     {
+        fprintf(stderr, "MIME start not found\n");
         return 4;
     }
-    printf("%s",content);
+    mimeStart += strlen("MIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n "); // shift to the start of the boundary cause we using char count should be insensitive
+    // parse mime header
+    const char* mimeEnd = strstr(mimeStart, "\r\n\r\n--");
+    if(mimeEnd == NULL)
+    {
+        fprintf(stderr, "MIME end not found\n");
+        return 4;
+    }
+    char* mimeHeader = (char*)malloc(mimeEnd - mimeStart + 1);
+    if(mimeHeader == NULL)
+    {
+        fprintf(stderr, "Failled To alloc for mime header\n");
+        return 4;
+    }
+    //if(strstr(mimeHeader, "multipart/alternative;\r\n boundary=");
+    strncpy(mimeHeader, mimeStart, mimeEnd - mimeStart);
+    mimeHeader[mimeEnd - mimeStart] = '\0';
+    char* boundary = strstr(mimeHeader, "boundary=");
+    //it if starts with boundary= then it is a should be valud mime header
+    if(boundary== NULL || boundary != mimeHeader) // check if boundary exists
+    {
+        fprintf(stderr, "Boundary not found\n");
+        return 4;
+    }
+    int boundMalloc = 0;
+    boundary += strlen("boundary=");
+    size_t len = strlen(boundary);
+    // Check if the string is non-empty and has at least two characters
+    if (boundary[0] == '"') {
+        boundary = get_char_substring(boundary, '"', '"');
+    }
+    //\r\n\r\n--a3db082a155977efa4360ef83b20589e58748c2fb6f413dbfe6915ddf7c0\r\nContent-Transfer-Encoding: quoted-printable\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n\r\n\r\nCourse: COMP30023
+    len = strlen(boundary) + strlen("\r\n--\r\nContent-Transfer-Encoding: "); // 6 characters for \r\n-- and \r\n
+    char* formatedboundary = (char*)malloc(len + 1);
+    if (formatedboundary == NULL) {
+        fprintf(stderr, "Failed to allocate memory for formatted string\n");
+        return 1;
+    }
+    sprintf(formatedboundary, "\r\n--%s\r\nContent-Transfer-Encoding: ", boundary);
+    char* startofFomatedBoundary = strstr(content, formatedboundary);
+    if(startofFomatedBoundary == NULL)
+    {
+        fprintf(stderr, "Boundary not found\n");
+        return 4;
+    }
+
+    printf("Formatted String: %s\n", formatedboundary);
+    // Free allocated memory
+    free(formatedboundary);
+    if(boundMalloc)
+    {
+        free(boundary);
+    }
+    free(mimeHeader);
     return 0;
 }
 int main(const int argc, char **argv)
@@ -636,6 +710,10 @@ int main(const int argc, char **argv)
         error_print("Command and server name are required");
         print_usage();
         exit(1);
+    }
+    if(folder == NULL)
+    {
+        folder = "INBOX";
     }
     ///////////////////////////////////
     struct addrinfo *result = 0;
@@ -739,6 +817,27 @@ int main(const int argc, char **argv)
         }
         printf("%s\n",header);
         free(header);
+    }
+    if(strcmp(command, "mime") == 0)
+    {
+        char* email = NULL;
+        if (imap_fetch_message(sock, messageNum, &email) != 0) {
+            printf("Message not found\n");
+            close(sock);
+            freeaddrinfo(result);
+            return 3;
+        }
+        char* mime = NULL;
+        if(mime_parse(email, &mime) != 0)
+        {
+            printf("Mime not found\n");
+            close(sock);
+            freeaddrinfo(result);
+            return 3;
+        }
+        printf("%s\n", mime);
+        free(mime);
+        free(email);
     }
     close(sock);
     freeaddrinfo(result);
