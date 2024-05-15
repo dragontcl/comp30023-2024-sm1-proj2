@@ -679,12 +679,13 @@ int main(const int argc, char **argv)
         }
         debug_print("Socket created successfully");
         debug_print("Setting IMAP port of sockaddr: %d", tflag ? IMAP_TLS_PORT : IMAP_PORT);
+        int i = 0;
         switch (addr->ai_family)
         {
             case AF_INET:
                 if(fallback == 0)
                 {
-                    warning_print("Failed to connect via IPV6 falling back to IPV4");
+                    warning_print("Failed to connect via IPV6 falling back to IPV4 %d ips tried",i);
                     fallback = 1;
                 }
                 ((struct sockaddr_in *)reversed->ai_addr)->sin_port = htons(tflag ? IMAP_TLS_PORT : IMAP_PORT);
@@ -695,10 +696,12 @@ int main(const int argc, char **argv)
             default:
                 error_print("Unknown ai_family: %d", addr->ai_family);
                 continue;
+            i++;
         }
         debug_print("Attempting to connect to the server");
         connected = connect(sock, reversed->ai_addr, reversed->ai_addrlen);
         if (connected < 0) {
+
             warning_print("Failed to connect: %s", strerror(errno));
             close(sock);
             continue;
