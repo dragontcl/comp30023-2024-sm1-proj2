@@ -711,85 +711,15 @@ int main(const int argc, char **argv)
         error_print("Failed to connect to the server: %s", server_name);
         return 1;
     }
-    info_print("Connection established to the server: %s", server_name);
     char* serverReady = full_recv(sock, 0, NULL);
     if(serverReady == NULL)
     {
         error_print("Failed to receive data from the server");
         return 1;
     }
-    info_print("Server ready: %s", serverReady);
-    free(serverReady);
-    debug_print("Attempting to authenticate with SASL PLAIN");
-    if(imap_authenticate_plain(sock, username, password) != 0)
-    {
 
-        printf("Login failure\n");
-        close(sock);
-        freeaddrinfo(result);
-        return 1;
-    }
-    if(imap_select_folder(sock, folder) != 0)
-    {
-       // printf("Folder not found\n");
-        //close(sock);
-        //freeaddrinfo(result);
-        //return 1;
-    }
-    if(strcmp(command, "retrieve") == 0)
-    {
-        char* email = NULL;
-        if(imap_fetch_message(sock, messageNum, &email) != 0)
-        {
-            printf("Message not found\n");
-            close(sock);
-            freeaddrinfo(result);
-            return 1;
-        }
-        printf("%s\n",email);
-        free(email);
-    }
-    if(strcmp(command, "parse") == 0)
-    {
-        char* header = NULL;
-        if(imap_fetch_message_header(sock, messageNum, &header) != 0)
-        {
-            printf("Header not found\n");
-            close(sock);
-            freeaddrinfo(result);
-            return 1;
-        }
-        printf("%s\n",header);
-        free(header);
-    }
-    if(strcmp(command, "mime") == 0)
-    {
-        char* email = NULL;
-        char* mime = NULL;
-        if(imap_fetch_message(sock, messageNum, &email) != 0)
-        {
-            printf("Message not found\n");
-            close(sock);
-            freeaddrinfo(result);
-            return 1;
-        }
-        int i;
-        if((i = mime_parse(email, &mime) != 0))
-        {
-            close(sock);
-            freeaddrinfo(result);
-            if(i == 4)
-            {
-                error_print("Failed to parse MIME, UTF-8 text/plain part not found ");
-            }
-            else
-            {
-                error_print("Failed to parse MIME, GENERIC");
-            }
-            return i;
-        }
-        free(email);
-    }
+
+
     close(sock);
     freeaddrinfo(result);
     return 0;
