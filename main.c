@@ -665,19 +665,14 @@ int main(const int argc, char **argv)
     int connected = -1;
     int fallback = 0;
     for (const struct addrinfo *addr = reversed; addr != NULL; addr = addr->ai_next) {
-        debug_print("Attemping to creating Socket");
         sock = socket(reversed->ai_family, reversed->ai_socktype, reversed->ai_protocol);
         if (sock < 0) {
-            warning_print("Socket creation failed: %s", strerror(errno));
             continue;
         }
-        debug_print("Socket created successfully");
-        debug_print("Setting IMAP port of sockaddr: %d", tflag ? IMAP_TLS_PORT : IMAP_PORT);
         int i = 0;
         switch (addr->ai_family) {
             case AF_INET:
                 if (fallback == 0) {
-                    warning_print("Failed to connect via IPV6 falling back to IPV4 %d ips tried", i);
                     fallback = 1;
                 }
                 ((struct sockaddr_in *)reversed->ai_addr)->sin_port = htons(tflag ? IMAP_TLS_PORT : IMAP_PORT);
@@ -686,42 +681,39 @@ int main(const int argc, char **argv)
                 ((struct sockaddr_in6 *)reversed->ai_addr)->sin6_port = htons(tflag ? IMAP_TLS_PORT : IMAP_PORT);
                 break;
             default:
-                error_print("Unknown ai_family: %d", addr->ai_family);
                 continue;
             i++;
         }
-        debug_print("Attempting to connect to the server");
         connected = connect(sock, reversed->ai_addr, reversed->ai_addrlen);
         if (connected < 0) {
-            warning_print("Failed to connect: %s", strerror(errno));
-            close(sock);
             continue;
         }
         break;
     }
     if (connected == -1) {
         error_print("Failed to connect to the server: %s", server_name);
-        freeaddrinfo(result);  // Free result here
+        close(sock);
+        freeaddrinfo(result);
         return 2;
     }
     char* serverReady = full_recv(sock, 0, NULL);
     if (serverReady == NULL) {
         error_print("Failed to receive data from the server");
         close(sock);
-        freeaddrinfo(result);  // Free result here
+        freeaddrinfo(result);
         return 3;
     }
     free(serverReady);  // Free serverReady here
     if (imap_authenticate_plain(sock, username, password) != 0) {
         printf("Login failure\n");
         close(sock);
-        freeaddrinfo(result);  // Free result here
+        freeaddrinfo(result);
         return 3;
     }
     if (imap_select_folder(sock, folder) != 0) {
         printf("Folder not found\n");
         close(sock);
-        freeaddrinfo(result);  // Free result here
+        freeaddrinfo(result);
         return 3;
     }
     if (strcmp(command, "retrieve") == 0) {
@@ -729,14 +721,13 @@ int main(const int argc, char **argv)
         if (imap_fetch_message(sock, messageNum, &email) != 0) {
             printf("Message not found\n");
             close(sock);
-            freeaddrinfo(result);  // Free result here
+            freeaddrinfo(result);
             return 3;
         }
         printf("%s\n", email);
-        free(email);  // Free email here
+        free(email);
     }
-
     close(sock);
-    freeaddrinfo(result);  // Free result here
+    freeaddrinfo(result);
     return 0;
 }
