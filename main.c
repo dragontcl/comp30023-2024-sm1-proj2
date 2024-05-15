@@ -723,7 +723,7 @@ int main(const int argc, char **argv)
         printf("Login failure\n");
         close(sock);
         freeaddrinfo(result);
-        return 4;
+        return 3;
     }
 
 
