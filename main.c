@@ -627,12 +627,12 @@ int main(const int argc, char **argv)
     char *username = NULL, *password = NULL, *folder = NULL, *messageNum = NULL, *command = NULL, *server_name = NULL;
     int tflag = 0, fflag = 0;
     parse_args(argc, argv, &username, &password, &folder, &messageNum, &command, &server_name, &tflag, &fflag);
-    if (username == NULL|| password == NULL) {
+    if (username == NULL || password == NULL) {
         error_print("Username and password are required");
         print_usage();
         exit(1);
     }
-    if (command == NULL|| server_name == NULL) {
+    if (command == NULL || server_name == NULL) {
         error_print("Command and server name are required");
         print_usage();
         exit(1);
@@ -645,34 +645,32 @@ int main(const int argc, char **argv)
     hints.ai_protocol = IPPROTO_TCP;
     debug_print("Attempting to resolve IPs for %s", server_name);
     /////// FIRST CALL FOR GETADDRINFO ////////
-    if (getaddrinfo(server_name, NULL, &hints, &result)){
+    if (getaddrinfo(server_name, NULL, &hints, &result)) {
         error_print("getaddrinfo failed to resolve: %s", strerror(errno));
-        freeaddrinfo(result);
+        freeaddrinfo(result);  // Free result here
         return 2;
     }
-    if(result == NULL){
+    if (result == NULL) {
         error_print("Failed to get address info");
+        freeaddrinfo(result);  // Free result here
         return 2;
     }
     const struct addrinfo *reversed = reverse_addrinfo(result);
     //check number of ips {HOSTNAME IPV6 thing}, idk why but this fixed the localhost ipv6 issue
     int i2 = 0;
-    while(reversed->ai_next != NULL)
-    {
+    while (reversed->ai_next != NULL) {
         i2++;
         reversed = reversed->ai_next;
     }
-    if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
-    {
+    if (reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6) {
         error_print("Unknown ai_family: %d", reversed->ai_family);
-        freeaddrinfo(result);
+        freeaddrinfo(result);  // Free result here
         return 2;
     }
     int sock = -1;
     int connected = -1;
     int fallback = 0;
-    for(const struct addrinfo *addr = reversed; addr != NULL; addr = addr->ai_next)
-    {
+    for (const struct addrinfo *addr = reversed; addr != NULL; addr = addr->ai_next) {
         debug_print("Attemping to creating Socket");
         sock = socket(reversed->ai_family, reversed->ai_socktype, reversed->ai_protocol);
         if (sock < 0) {
@@ -682,12 +680,10 @@ int main(const int argc, char **argv)
         debug_print("Socket created successfully");
         debug_print("Setting IMAP port of sockaddr: %d", tflag ? IMAP_TLS_PORT : IMAP_PORT);
         int i = 0;
-        switch (addr->ai_family)
-        {
+        switch (addr->ai_family) {
             case AF_INET:
-                if(fallback == 0)
-                {
-                    warning_print("Failed to connect via IPV6 falling back to IPV4 %d ips tried",i);
+                if (fallback == 0) {
+                    warning_print("Failed to connect via IPV6 falling back to IPV4 %d ips tried", i);
                     fallback = 1;
                 }
                 ((struct sockaddr_in *)reversed->ai_addr)->sin_port = htons(tflag ? IMAP_TLS_PORT : IMAP_PORT);
@@ -703,70 +699,60 @@ int main(const int argc, char **argv)
         debug_print("Attempting to connect to the server");
         connected = connect(sock, reversed->ai_addr, reversed->ai_addrlen);
         if (connected < 0) {
-
             warning_print("Failed to connect: %s", strerror(errno));
             close(sock);
             continue;
         }
         break;
     }
-    if(connected == -1)
-    {
+    if (connected == -1) {
         error_print("Failed to connect to the server: %s", server_name);
-        freeaddrinfo(result);
+        freeaddrinfo(result);  // Free result here
         return 2;
     }
     char* serverReady = full_recv(sock, 0, NULL);
-    if(serverReady == NULL)
-    {
+    if (serverReady == NULL) {
         error_print("Failed to receive data from the server");
         close(sock);
-        freeaddrinfo(result);
+        freeaddrinfo(result);  // Free result here
         return 3;
     }
-    free(serverReady);
-    if(imap_authenticate_plain(sock, username, password) != 0)
-    {
-
+    free(serverReady);  // Free serverReady here
+    if (imap_authenticate_plain(sock, username, password) != 0) {
         printf("Login failure\n");
         close(sock);
-        freeaddrinfo(result);
+        freeaddrinfo(result);  // Free result here
         return 3;
     }
-    if(imap_select_folder(sock, folder) != 0)
-    {
+    if (imap_select_folder(sock, folder) != 0) {
         printf("Folder not found\n");
         close(sock);
-        freeaddrinfo(result);
+        freeaddrinfo(result);  // Free result here
         return 3;
     }
-    if(strcmp(command, "retrieve") == 0)
-    {
+    if (strcmp(command, "retrieve") == 0) {
         char* email = NULL;
-        if(imap_fetch_message(sock, messageNum, &email) != 0)
-        {
+        if (imap_fetch_message(sock, messageNum, &email) != 0) {
             printf("Message not found\n");
             close(sock);
-            freeaddrinfo(result);
+            freeaddrinfo(result);  // Free result here
             return 3;
         }
-        printf("%s\n",email);
-        free(email);
+        printf("%s\n", email);
+        free(email);  // Free email here
     }
-    if(strcmp(command, "parse") == 0)
-    {
+    if (strcmp(command, "parse") == 0) {
         char* header = NULL;
-        if(imap_fetch_message_header(sock, messageNum, &header) != 0)
-        {
+        if (imap_fetch_message_header(sock, messageNum, &header) != 0) {
             printf("Header not found\n");
             close(sock);
-            freeaddrinfo(result);
+            freeaddrinfo(result);  // Free result here
             return 1;
         }
-        printf("%s\n",header);
-        free(header);
+        printf("%s\n", header);
+        free(header);  // Free header here
     }
     close(sock);
-    freeaddrinfo(result);
+    freeaddrinfo(result);  // Free result here
     return 0;
 }
