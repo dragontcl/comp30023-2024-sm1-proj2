@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -8,7 +9,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <stdarg.h>
-
+#include <regex.h>
 #include <arpa/inet.h>
 
 #include <unistd.h>
@@ -630,71 +631,380 @@ char* get_char_substring(const char* str, const char start, const char end) {
     substring[length] = '\0';
     return substring;
 }
-int mime_parse(char* content, char** mime);
-int mime_parse(char* content, char** mime)
+char* removeQuotes(char* input);
+char* removeQuotes(char* input){
+    char* writePtr = malloc(strlen(input)+1);
+    char* writeOriPtr = writePtr;
+    char* readPtr = input;
+    while (*readPtr) {
+        if (*readPtr != '"') {
+            *writePtr++ = *readPtr;
+        }
+        readPtr++;
+    }
+    *writePtr = '\0';
+    return writeOriPtr;
+}
+int mime_parse(const int sock,  char*  messageNum, char** mime);
+char* extractBodyCTEStart(char* emailBody,char* boundaryStart)
 {
-    const char* mimeStart = strstr(content, "MIME-Version: 1.0\r\nContent-Type: "); //asume that all MIME headers start with this
-    if(mimeStart == NULL)
+    char* tempEmail = malloc(strlen("Content-Transfer-Encoding: quoted-printable") + 2);
+    if (tempEmail == NULL) {
+        error_print("Memory allocation failed for tempEmail");
+        return NULL;
+    }
+    strncpy(tempEmail, emailBody, 44);
+    tempEmail[44] = '\0';
+    //strncpy(tempEmail, emailBody, strlen("Content-Transfer-Encoding: quoted-printable"));
+    //tempEmail[strlen("Content-Transfer-Encoding: quoted-printable")+1] = '\0';
+    for (int i = 0; tempEmail[i]; i++) {
+        tempEmail[i] = tolower(tempEmail[i]);
+    }
+    for(int i = 0; tempEmail[i]; i++) tempEmail[i] = tolower(tempEmail[i]);
+    //check for content-transfer-encoding
+    if(strncmp(tempEmail, "content-transfer-encoding: quoted-printable", strlen("content-transfer-encoding: quoted-printable")) == 0)
     {
-        fprintf(stderr, "MIME start not found\n");
+        char* tempEmail2 = strstr(emailBody, "\r\n");
+        if(tempEmail2 == NULL)
+        {
+            free(tempEmail);
+            return NULL;
+        }
+        emailBody = tempEmail2 + 2;
+    }
+    else if(strncmp(tempEmail, "content-transfer-encoding: 7bit", strlen("content-transfer-encoding: 7bit")) == 0)
+    {
+        char* tempEmail2 = strstr(emailBody, "\r\n");
+        if(tempEmail2 == NULL)
+        {
+            free(tempEmail);
+            return NULL;
+        }
+        emailBody = tempEmail2 + 2;
+    }
+    else if(strncmp(tempEmail, "content-transfer-encoding: 8bit", strlen("content-transfer-encoding: 8bit")) == 0)
+    {
+        char* tempEmail2 = strstr(emailBody, "\r\n");
+        if(tempEmail2 == NULL)
+        {
+            free(tempEmail);
+            return NULL;
+        }
+        emailBody = tempEmail2 + 2;
+    }
+    else
+    {
+        free(tempEmail);
+        return NULL;
+    }
+    //check for content-type
+    free(tempEmail);
+    char* end = strstr(emailBody, "\r\n\r\n");
+    if(end == NULL)
+    {
+        return NULL;
+    }
+    char* contentType = malloc(end - emailBody + 1);
+    if (contentType == NULL) {
+        error_print("Memory allocation failed for contentType");
+
+        return NULL;
+    }
+    strncpy(contentType, emailBody, end - emailBody);
+    contentType[end - emailBody] = '\0';
+    for(int i = 0; contentType[i]; i++) contentType[i] = tolower(contentType[i]);
+    char* removedQoute = removeQuotes(contentType);
+    if(strncmp(removedQoute, "content-type: text/plain; charset=utf-8", strlen("content-type: text/plain; charset=utf-8")) != 0)
+    {
+        free(removedQoute);
+        free(contentType);
+        return NULL;
+    }
+    free(removedQoute);
+    free(contentType);
+    emailBody = end + 4;
+    char* emailTemp= strdup(emailBody);
+    end = strstr(emailTemp, boundaryStart);
+    // Use the emailBody for further processing, if required.
+    if(end != NULL)
+    {
+        *end = '\0';
+    }
+    else
+    {
+        free(emailTemp);
+        free(removedQoute);
+        free(contentType);
+        return NULL;
+    }
+    return emailTemp;
+}
+int match_content_type(const char *string) {
+    const char *pattern = "Content-Transfer-Encoding:\\s*quoted-printable\\\\r\\\\nContent-Type:\\s*text/plain;(\\\\r\\\\n|\\s*)charset=\"?UTF-8\"?\\\\r\\\\n";
+    regex_t regex;
+    int result;
+
+    result = regcomp(&regex, pattern, REG_EXTENDED | REG_NEWLINE);
+    if (result) {
+        fprintf(stderr, "Could not compile regex\n");
+        return 0;
+    }
+
+    // Execute the regex
+    result = regexec(&regex, string, 0, NULL, 0);
+    if (!result) {
+        regfree(&regex);
+        return 1;  // Match found
+    } else if (result == REG_NOMATCH) {
+        regfree(&regex);
+        return 0;  // No match
+    } else {
+        char error_message[100];
+        regerror(result, &regex, error_message, sizeof(error_message));
+        fprintf(stderr, "Regex match failed: %s\n", error_message);
+        regfree(&regex);
+        return 0;
+    }
+}
+char* extractBodyCTStart(char* emailBody,char* boundaryStart)
+{
+    char* headerend = strstr(emailBody, "\r\n\r\n");
+    if(headerend == NULL)
+    {
+        return NULL;
+    }
+    char* contentType = malloc(headerend - emailBody + 1);
+    if (contentType == NULL) {
+        error_print("Memory allocation failed for contentType");
+        return NULL;
+    }
+    strncpy(contentType, emailBody, headerend - emailBody);
+    contentType[headerend - emailBody] = '\0';
+    int t = match_content_type(headerend);
+    char* tempEmail = malloc(strlen("Content-Transfer-Encoding: quoted-printable") + 2);
+    if (tempEmail == NULL) {
+        error_print("Memory allocation failed for tempEmail");
+        return NULL;
+    }
+}
+int mime_parse(const int sock,  char*  messageNum, char** mime)
+{
+    char* header = NULL;
+    int result = -1;
+    const char *tag = generate_imap_tag();
+    char *command = malloc(strlen(tag) + strlen(" FETCH ") + strlen(messageNum) + strlen(" BODY.PEEK[HEADER.FIELDS (Content-Type)]") + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return result;
+    }
+    sprintf(command, "%s FETCH %s BODY.PEEK[HEADER.FIELDS (Content-Type)]%s", tag, messageNum, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0) {
+        error_print("Failed to send FETCH command");
+        return result;
+    }
+    char *response = full_recv(sock, 1, (char*)tag);
+    if(response == NULL)
+    {
+        error_print("Failed to receive data from the server");
+        return result;
+    }
+    const char* finalResponse = return_final_response(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Message fetch successful");
+        header = parse_imap_response(response);
+        if(header == NULL)
+        {
+            error_print("Failed to parse the response");
+            return result;
+        }
+        result = 0; // Successful message fetch
+    }
+    removeCRLF(header);
+    for(int i = 0; header[i]; i++) header[i] = tolower(header[i]);
+    //check if it starts with the followijng string
+    if(strncmp(header, "content-type: multipart/alternative; boundary=", strlen("content-type: multipart/alternative; boundary=") != 0))
+    {
+        free(response);
+        free(header);
         return 4;
     }
-    mimeStart += strlen("MIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n "); // shift to the start of the boundary cause we using char count should be insensitive
-    // parse mime header
-    const char* mimeEnd = strstr(mimeStart, "\r\n\r\n--");
-    if(mimeEnd == NULL)
-    {
-        fprintf(stderr, "MIME end not found\n");
+    char* temp = header+strlen("content-type: multipart/alternative; boundary=");
+    char* boundary = 0;
+    if(temp[0] == '"') {
+        boundary = get_char_substring(temp, '"', '"');
+    } else {
+        int boundary_len = strlen(temp);
+        boundary = malloc(boundary_len + 1); // plus one for the null terminator
+        if (boundary == NULL) {
+            error_print("Memory allocation failed for boundary");
+            free(response);
+            free(header);
+            return 4;
+        }
+        strncpy(boundary, temp, boundary_len);
+        if (boundary[boundary_len - 1] == '\r') {
+            boundary[boundary_len - 1] = '\0';
+        } else {
+            boundary[boundary_len] = '\0';
+        }
+    }
+    char* email = NULL;
+    if (imap_fetch_message(sock, messageNum, &email) != 0) {
+        printf("Message not found\n");
+        free(boundary);
+        free(response);
+        free(email);
+        free(header);
         return 4;
     }
-    char* mimeHeader = (char*)malloc(mimeEnd - mimeStart + 1);
-    if(mimeHeader == NULL)
+    char* boundaryStart = NULL;
+    if (boundary != NULL) {
+        boundaryStart = malloc(strlen(boundary) + 7); // Two for "--", one for '\0', 6 for "CRLF"
+        if (boundaryStart == NULL) {
+            error_print("Memory allocation failed for boundaryStart");
+            free(boundary);
+            free(response);
+            free(header);
+            free(email);
+            return 4; // memory allocation failure
+        }
+        strcpy(boundaryStart, "\r\n--");
+        strcat(boundaryStart, boundary); // Append the original boundary to "--"
+    }
+    char* emailStartLocation = strstr(email,  boundaryStart);
+    if(emailStartLocation == NULL)
     {
-        fprintf(stderr, "Failled To alloc for mime header\n");
+        free(boundary);
+        free(response);
+        free(header);
+        free(email);
         return 4;
     }
-    //if(strstr(mimeHeader, "multipart/alternative;\r\n boundary=");
-    strncpy(mimeHeader, mimeStart, mimeEnd - mimeStart);
-    mimeHeader[mimeEnd - mimeStart] = '\0';
-    char* boundary = strstr(mimeHeader, "boundary=");
-    //it if starts with boundary= then it is a should be valud mime header
-    if(boundary== NULL || boundary != mimeHeader) // check if boundary exists
+    char* emailBody = emailStartLocation + strlen(boundaryStart)+2;
+    // CHECK FOR CTE START
+    char* emailTemp = extractBodyCTEStart(emailBody, boundaryStart);
+    if(emailTemp == NULL)
     {
-        fprintf(stderr, "Boundary not found\n");
-        return 4;
+        emailTemp = extractBodyCTStart(emailBody, boundaryStart);
     }
-    int boundMalloc = 0;
-    boundary += strlen("boundary=");
-    size_t len = strlen(boundary);
-    // Check if the string is non-empty and has at least two characters
-    if (boundary[0] == '"') {
-        boundary = get_char_substring(boundary, '"', '"');
+
+    //printf("%s", emailTemp);
+    *mime = strdup(emailTemp);
+    free(emailTemp);
+    free(boundaryStart);
+    free(boundary);
+    free(response);
+    free(header);
+    free(email);
+    return 0; // Successful processing
+}
+
+int imap_list_email(int sock, const char *folder, char** mailList);
+int imap_list_email(int sock, const char* folder, char** mailList) {
+    int result = -1;
+    const char* tag = generate_imap_tag();
+    char* command = malloc(strlen(tag) + strlen(" SELECT ") + strlen(folder) + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return result;
     }
-    //\r\n\r\n--a3db082a155977efa4360ef83b20589e58748c2fb6f413dbfe6915ddf7c0\r\nContent-Transfer-Encoding: quoted-printable\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n\r\n\r\nCourse: COMP30023
-    len = strlen(boundary) + strlen("\r\n--\r\nContent-Transfer-Encoding: "); // 6 characters for \r\n-- and \r\n
-    char* formatedboundary = (char*)malloc(len + 1);
-    if (formatedboundary == NULL) {
-        fprintf(stderr, "Failed to allocate memory for formatted string\n");
-        return 1;
+    sprintf(command, "%s SELECT %s%s", tag, folder, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent < 0) {
+        error_print("Failed to send SELECT command");
+        return result;
     }
-    sprintf(formatedboundary, "\r\n--%s\r\nContent-Transfer-Encoding: ", boundary);
-    char* startofFomatedBoundary = strstr(content, formatedboundary);
-    if(startofFomatedBoundary == NULL)
-    {
-        fprintf(stderr, "Boundary not found\n");
+
+    char* response = full_recv(sock, 1, (char*)tag);
+    if (response == NULL) {
+        error_print("Failed to receive data from the server");
+        return result;
+    }
+    const char* finalResponse = return_final_response(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Folder selection successful");
+    } else {
+        error_print("Folder selection failed");
+        free(response);
+        return result;
+    }
+
+    free(response);
+
+    // Now we need to fetch the list of emails
+    tag = generate_imap_tag();
+    command = malloc(strlen(tag) + strlen(" SEARCH ALL") + strlen(END_OF_PACKET) + 1);
+    if (command == NULL) {
+        error_print("Memory allocation failed for command");
+        return result;
+    }
+    sprintf(command, "%s SEARCH ALL%s", tag, END_OF_PACKET);
+    debug_print("Sending command: %s", command);
+    const int sent2 = send(sock, command, strlen(command), 0);
+    free(command);
+    if (sent2 < 0) {
+        error_print("Failed to send SEARCH command");
+        return result;
+    }
+
+    response = full_recv(sock, 1, (char*)tag);
+    if (response == NULL) {
+        error_print("Failed to receive data from the server");
+        return result;
+    }
+    finalResponse = return_final_response(response);
+    if (strncmp(finalResponse, tag, strlen(tag)) == 0 && strncmp(finalResponse + strlen(tag) + 1, "OK", 2) == 0) {
+        debug_print("Email list fetch successful");
+        char *start, *end, *token;
+        start = strstr(response, "* SEARCH ") + strlen("* SEARCH ");
+        end = strstr(start, "\r\n");
+        int length = end - start;
+        char* substring = (char *)malloc((length + 1) * sizeof(char));
+        // Extract the substring
+        strncpy(substring, start, end - start);
+        substring[end - start] = '\0';
+
+        // Split the substring using ' ' as delimiter
+        token = strtok(substring, " ");
+        while (token != NULL) {
+            char* temp;
+            if(imap_fetch_message_header_subject( sock, token, &temp) != 0)
+            {
+                error_print("Failed to fetch email subject");
+                free(substring);
+                free(temp);
+                return 4;
+            }
+            else
+            {
+                const char *formattedSubject = strchr(temp, ':');
+                if(strlen(temp) > 0 && formattedSubject != NULL)
+                    formattedSubject++;
+                else
+                    formattedSubject = " <No subject>";
+                printf("%s:%s\n", token, formattedSubject);
+            }
+            free(temp);
+            token = strtok(NULL, " ");
+
+        }
+        free(substring);
+        result = 0; // Successful email list fetch
+    } else {
+        error_print("Failed to fetch email list");
         return 4;
     }
 
-    printf("Formatted String: %s\n", formatedboundary);
-    // Free allocated memory
-    free(formatedboundary);
-    if(boundMalloc)
-    {
-        free(boundary);
-    }
-    free(mimeHeader);
-    return 0;
+    info_print("%s", response);
+    free(response);
+    return result;
 }
+
 int main(const int argc, char **argv)
 {
     //////////COMMAND LINE STUFF//////////
@@ -820,24 +1130,36 @@ int main(const int argc, char **argv)
     }
     if(strcmp(command, "mime") == 0)
     {
-        char* email = NULL;
-        if (imap_fetch_message(sock, messageNum, &email) != 0) {
-            printf("Message not found\n");
-            close(sock);
-            freeaddrinfo(result);
-            return 3;
-        }
-        char* mime = NULL;
-        if(mime_parse(email, &mime) != 0)
+        //char* email = NULL;
+        //if (imap_fetch_message(sock, messageNum, &email) != 0) {
+        //    printf("Message not found\n");
+        //    close(sock);
+        //    freeaddrinfo(result);
+        //    return 3;
+        //}
+        //char* mime = NULL;
+        //if(mime_parse(sock,messageNum, &mime) != 0)
+        //{
+        //    printf("Mime not found\n");
+        //    close(sock);
+        //    freeaddrinfo(result);
+        //    return 3;
+        //}
+        //printf("%s", mime);
+        //free(mime);
+        //free(email);
+    }
+    if(strcmp(command, "list") == 0)
+    {
+        char* mailList = NULL;
+        if(imap_list_email(sock, folder, &mailList) != 0)
         {
-            printf("Mime not found\n");
+            printf("List not found\n");
             close(sock);
             freeaddrinfo(result);
             return 3;
         }
-        printf("%s\n", mime);
-        free(mime);
-        free(email);
+        free(mailList);
     }
     close(sock);
     freeaddrinfo(result);
