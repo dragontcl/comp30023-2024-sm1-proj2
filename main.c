@@ -705,10 +705,10 @@ int main(const int argc, char **argv)
         }
         break;
     }
-    freeaddrinfo(result);
     if(connected == -1)
     {
         error_print("Failed to connect to the server: %s", server_name);
+        freeaddrinfo(result);
         return 2;
     }
     char* serverReady = full_recv(sock, 0, NULL);
