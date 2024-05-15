@@ -8,7 +8,7 @@ EXE = fetchmail
 DEBUG_EXE = fetchmail_debug
 
 # Main production target
-all: CFLAGS += $(DFLAGS)
+#all: CFLAGS += $(DFLAGS)
 all: LDFLAGS += $(OPENSSL_LIBS)
 all: $(EXE)
 
