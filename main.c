@@ -636,16 +636,6 @@ int main(const int argc, char **argv)
         print_usage();
         exit(EXIT_FAILURE);
     }
-#ifndef NDEBUG
-    //info_print("Username: %s", username);
-    //info_print("Password: %s", password);
-    //info_print("Folder: %s", folder);
-    //info_print("Message Number: %s", messageNum);
-    //info_print("Command: %s", command);
-    //info_print("Server Name: %s", server_name);
-    //info_print("TLS Flag: %d", tflag);
-    //info_print("Command: %s", command);
-#endif
     struct addrinfo *result = 0;
     struct addrinfo hints = {0};
     hints.ai_family = AF_UNSPEC;
@@ -660,16 +650,14 @@ int main(const int argc, char **argv)
         error_print("Failed to get address info");
         return 2;
     }
-
     const struct addrinfo *reversed = reverse_addrinfo(result);
-    //check number of ips {HOSTNAME IPV6 thing}
+    //check number of ips {HOSTNAME IPV6 thing}, idk why but this fixed the localhost ipv6 issue
     int i2 = 0;
     while(reversed->ai_next != NULL)
     {
         i2++;
         reversed = reversed->ai_next;
     }
-
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
         error_print("Unknown ai_family: %d", reversed->ai_family);
@@ -728,6 +716,7 @@ int main(const int argc, char **argv)
         error_print("Failed to receive data from the server");
         return 3;
     }
+    free(serverReady);
 
 
 
