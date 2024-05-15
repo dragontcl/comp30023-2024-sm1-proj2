@@ -11,6 +11,7 @@
 #include <stdarg.h>
 #include <regex.h>
 #include <arpa/inet.h>
+#include <openssl/ssl.h>
 
 #include <unistd.h>
 #include <openssl/evp.h>
@@ -200,6 +201,60 @@ char* full_recv(const int sock, const int tf, const char* tag) {
                         break;
                     }
                 }
+            }
+        }
+    }
+    if (received < 0) {
+        free(data);
+        return NULL;
+    }
+    if (data != NULL) {
+        data[total_received] = '\0';
+    }
+    debug_print("RECV: %s", data);
+    return data;
+}
+char* full_recv_SSL(SSL* ssl, int tf, const char* tag);
+char* full_recv_SSL(SSL* ssl, int tf, const char* tag) {
+    char buffer[CHUNK_SIZE];
+    char *data = malloc(1);
+    int received;
+    int total_received = 0;
+    if (!data) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return NULL;
+    }
+    while((received = SSL_read(ssl, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[received] = '\0';
+        char *temp = realloc(data, total_received + received + 1);
+        if (temp == NULL) {
+            free(data);
+            fprintf(stderr, "Memory allocation failed\n");
+            return NULL;
+        }
+        memset(temp + total_received, 0, received + 1); // Initialize reallocated memory
+        data = temp;
+        memcpy(data + total_received, buffer, received);
+        total_received += received;
+        const char* dataFinal = return_final_response(data);
+        if (tf == 0) {
+            // Non-tagged response check
+            if (strncmp(dataFinal, "* OK", 4) == 0 ||
+                strncmp(dataFinal, "* BAD", 5) == 0 ||
+                strncmp(dataFinal, "* NO", 4) == 0) {
+                if (strstr(buffer, "\r\n") != NULL) {
+                    break;
+                }
+                }
+        } else if (tf == 1) {
+            if (strncmp(dataFinal, tag, strlen(tag)) == 0) {
+                if (strncmp(dataFinal + strlen(tag) + 1, "OK", 2) == 0 ||
+                    strncmp(dataFinal + strlen(tag) + 1, "BAD", 3) == 0 ||
+                    strncmp(dataFinal + strlen(tag) + 1, "NO", 2) == 0) {
+                    if (strstr(buffer, "\r\n") != NULL) {
+                        break;
+                    }
+                    }
             }
         }
     }
@@ -1007,9 +1062,33 @@ int imap_list_email(int sock, const char* folder, char** mailList) {
     free(response);
     return result;
 }
+void init_openssl_library(void)
+{
+    (void)SSL_library_init();
+    SSL_load_error_strings();
+}
+SSL_CTX* create_context() {
+    const SSL_METHOD *method;
+    SSL_CTX *ctx;
+
+    method = SSLv23_client_method();
+    ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        perror("Unable to create SSL context");
+        exit(EXIT_FAILURE);
+    }
+
+    return ctx;
+}
 
 int main(const int argc, char **argv)
 {
+    SSL_CTX *ctx;
+    SSL *ssl;
+    init_openssl_library();
+    ctx = create_context();
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+    ssl = SSL_new(ctx);
     //////////COMMAND LINE STUFF//////////
     char *username = NULL, *password = NULL, *folder = NULL, *messageNum = NULL, *command = NULL, *server_name = NULL;
     int tflag = 0, fflag = 0;
@@ -1038,6 +1117,7 @@ int main(const int argc, char **argv)
     /////// FIRST CALL FOR GETADDRINFO ////////
     const int s  = getaddrinfo(server_name, NULL, &hints, &result);
     if (s != 0) {
+        freeaddrinfo(result);  // Free result here
         return 2;
     }
     const struct addrinfo *reversed = reverse_addrinfo(result);
@@ -1086,6 +1166,17 @@ int main(const int argc, char **argv)
         freeaddrinfo(result);
         return 2;
     }
+    if (tflag) {
+        SSL_set_fd(ssl, sock);
+        if (SSL_connect(ssl) != 1) {
+            error_print("Failed to establish a secure connection");
+            close(sock);
+            freeaddrinfo(result);
+            return 2;
+        }
+    }
+
+
     char* serverReady = full_recv(sock, 0, NULL);
     if (serverReady == NULL) {
         error_print("Failed to receive data from the server");
@@ -1165,5 +1256,9 @@ int main(const int argc, char **argv)
     }
     close(sock);
     freeaddrinfo(result);
+    SSL_free(ssl);
+    close(sock);
+    SSL_CTX_free(ctx);
+    EVP_cleanup();
     return 0;
 }
