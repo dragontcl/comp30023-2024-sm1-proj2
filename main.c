@@ -649,6 +649,7 @@ int main(const int argc, char **argv)
     }
     if(result == NULL){
         error_print("Failed to get address info");
+        freeaddrinfo(result);
         return 2;
     }
     const struct addrinfo *reversed = reverse_addrinfo(result);
@@ -709,7 +710,6 @@ int main(const int argc, char **argv)
     if(connected == -1)
     {
         error_print("Failed to connect to the server: %s", server_name);
-        close(sock);
         freeaddrinfo(result);
         return 2;
     }
@@ -763,7 +763,6 @@ int main(const int argc, char **argv)
         printf("%s\n",header);
         free(header);
     }
-
     close(sock);
     freeaddrinfo(result);
     return 0;
