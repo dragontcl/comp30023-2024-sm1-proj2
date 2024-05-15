@@ -50,14 +50,12 @@ void warning_print(const char *format, ...)
 #endif
 }
 void error_print(const char *format, ...) {
-#ifndef NDEBUG
     va_list args;
     va_start(args, format);
     fprintf(stderr, "%s[ERROR]", ERROR);
     vfprintf(stderr, format, args);
     va_end(args);
     fprintf(stderr, "%s\n", NORMAL);
-#endif
 }
 void info_print(const char *format, ...) {
 #ifndef NDEBUG
