@@ -717,7 +717,10 @@ int main(const int argc, char **argv)
         return 3;
     }
     free(serverReady);
-
+    if (imap_authenticate_plain(sock, username, password) < 0) {
+        error_print("Failed to authenticate with the server");
+        return 4;
+    }
 
 
     close(sock);
