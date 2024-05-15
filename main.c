@@ -660,7 +660,15 @@ int main(const int argc, char **argv)
         error_print("Failed to get address info");
         return 1;
     }
+
     const struct addrinfo *reversed = reverse_addrinfo(result);
+    int i2 = 0;
+    while(reversed->ai_next != NULL)
+    {
+        i2++;
+        reversed = reversed->ai_next;
+    }
+    debug_print("IPs Resolved %d", i2);
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
         error_print("Unknown ai_family: %d", reversed->ai_family);
