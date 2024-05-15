@@ -50,12 +50,14 @@ void warning_print(const char *format, ...)
 #endif
 }
 void error_print(const char *format, ...) {
+#ifndef NDEBUG
     va_list args;
     va_start(args, format);
     fprintf(stderr, "%s[ERROR]", ERROR);
     vfprintf(stderr, format, args);
     va_end(args);
     fprintf(stderr, "%s\n", NORMAL);
+#endif
 }
 void info_print(const char *format, ...) {
 #ifndef NDEBUG
@@ -671,7 +673,6 @@ int main(const int argc, char **argv)
         reversed = reversed->ai_next;
     }
 #endif
-
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
         error_print("Unknown ai_family: %d", reversed->ai_family);
@@ -730,7 +731,13 @@ int main(const int argc, char **argv)
         error_print("Failed to receive data from the server");
         return 1;
     }
-
+    if(imap_authenticate_plain(sock, username, password) != 0)
+    {
+        printf("Login failure\n");
+        close(sock);
+        freeaddrinfo(result);
+        return 3;
+    }
 
 
     close(sock);
