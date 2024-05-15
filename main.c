@@ -623,25 +623,28 @@ int mime_parse(char* content, char** mime)
 }
 int main(const int argc, char **argv)
 {
+    //////////COMMAND LINE STUFF//////////
     char *username = NULL, *password = NULL, *folder = NULL, *messageNum = NULL, *command = NULL, *server_name = NULL;
     int tflag = 0, fflag = 0;
     parse_args(argc, argv, &username, &password, &folder, &messageNum, &command, &server_name, &tflag, &fflag);
     if (username == NULL|| password == NULL) {
         error_print("Username and password are required");
         print_usage();
-        exit(EXIT_FAILURE);
+        exit(1);
     }
     if (command == NULL|| server_name == NULL) {
         error_print("Command and server name are required");
         print_usage();
-        exit(EXIT_FAILURE);
+        exit(1);
     }
+    ///////////////////////////////////
     struct addrinfo *result = 0;
     struct addrinfo hints = {0};
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     debug_print("Attempting to resolve IPs for %s", server_name);
+    /////// FIRST CALL FOR GETADDRINFO ////////
     if (getaddrinfo(server_name, NULL, &hints, &result)){
         error_print("getaddrinfo failed to resolve: %s", strerror(errno));
         freeaddrinfo(result);
@@ -649,7 +652,6 @@ int main(const int argc, char **argv)
     }
     if(result == NULL){
         error_print("Failed to get address info");
-        freeaddrinfo(result);
         return 2;
     }
     const struct addrinfo *reversed = reverse_addrinfo(result);
@@ -663,6 +665,7 @@ int main(const int argc, char **argv)
     if(reversed->ai_family != AF_INET && reversed->ai_family != AF_INET6)
     {
         error_print("Unknown ai_family: %d", reversed->ai_family);
+        freeaddrinfo(result);
         return 2;
     }
     int sock = -1;
