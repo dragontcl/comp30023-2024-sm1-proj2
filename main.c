@@ -639,15 +639,14 @@ int main(const int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 #ifndef NDEBUG
-    info_print("Username: %s", username);
-    info_print("Password: %s", password);
-    info_print("Folder: %s", folder);
-    info_print("Message Number: %s", messageNum);
-    info_print("Command: %s", command);
-    info_print("Server Name: %s", server_name);
-    info_print("TLS Flag: %d", tflag);
-    info_print("Command: %s", command);
-    info_print("Server Name: %s", server_name);
+    //info_print("Username: %s", username);
+    //info_print("Password: %s", password);
+    //info_print("Folder: %s", folder);
+    //info_print("Message Number: %s", messageNum);
+    //info_print("Command: %s", command);
+    //info_print("Server Name: %s", server_name);
+    //info_print("TLS Flag: %d", tflag);
+    //info_print("Command: %s", command);
 #endif
     struct addrinfo *result = 0;
     struct addrinfo hints = {0};
@@ -655,6 +654,7 @@ int main(const int argc, char **argv)
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     debug_print("Attempting to resolve IPs for %s", server_name);
+    server_name = "localhost";
     if (getaddrinfo(server_name, NULL, &hints, &result)){
         error_print("getaddrinfo failed to resolve: %s", strerror(errno));
         return 1;
