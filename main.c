@@ -725,6 +725,26 @@ int main(const int argc, char **argv)
         freeaddrinfo(result);
         return 3;
     }
+    if(imap_select_folder(sock, folder) != 0)
+    {
+        printf("Folder not found\n");
+        close(sock);
+        freeaddrinfo(result);
+        return 3;
+    }
+    if(strcmp(command, "retrieve") == 0)
+    {
+        char* email = NULL;
+        if(imap_fetch_message(sock, messageNum, &email) != 0)
+        {
+            printf("Message not found\n");
+            close(sock);
+            freeaddrinfo(result);
+            return 3;
+        }
+        printf("%s\n",email);
+        free(email);
+    }
 
 
     close(sock);
