@@ -727,6 +727,19 @@ int main(const int argc, char **argv)
         printf("%s\n", email);
         free(email);
     }
+    if(strcmp(command, "parse") == 0)
+    {
+        char* header = NULL;
+        if(imap_fetch_message_header(sock, messageNum, &header) != 0)
+        {
+            printf("Header not found\n");
+            close(sock);
+            freeaddrinfo(result);
+            return 1;
+        }
+        printf("%s\n",header);
+        free(header);
+    }
     close(sock);
     freeaddrinfo(result);
     return 0;
