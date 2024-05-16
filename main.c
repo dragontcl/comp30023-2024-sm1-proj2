@@ -1159,10 +1159,11 @@ int main(const int argc, char **argv)
         }
         break;
     }
+    freeaddrinfo(result); //insta free after using
+
     if (connected == -1) {
         error_print("Failed to connect to the server: %s", server_name);
         close(sock);
-        freeaddrinfo(result);
         return 2;
     }
     if (tflag) {
@@ -1170,7 +1171,6 @@ int main(const int argc, char **argv)
         if (SSL_connect(ssl) != 1) {
             error_print("Failed to establish a secure connection");
             close(sock);
-            freeaddrinfo(result);
             return 2;
         }
     }
@@ -1180,20 +1180,17 @@ int main(const int argc, char **argv)
     if (serverReady == NULL) {
         error_print("Failed to receive data from the server");
         close(sock);
-        freeaddrinfo(result);
         return 3;
     }
     free(serverReady);  // Free serverReady here
     if (imap_authenticate_plain(sock, username, password) != 0) {
         printf("Login failure\n");
         close(sock);
-        freeaddrinfo(result);
         return 3;
     }
     if (imap_select_folder(sock, folder) != 0) {
         printf("Folder not found\n");
         close(sock);
-        freeaddrinfo(result);
         return 3;
     }
     if (strcmp(command, "retrieve") == 0) {
@@ -1210,7 +1207,6 @@ int main(const int argc, char **argv)
                 if(imap_fetch_message(sock, messageNum, &email) != 0) {
                     printf("Message not found\n");
                     close(sock);
-                    freeaddrinfo(result);
                     return 3;
                 }
                 printf("%s\n", email);
@@ -1226,7 +1222,6 @@ int main(const int argc, char **argv)
                 if(imap_fetch_message(sock, messageNum, &email) != 0) {
                     printf("Message not found\n");
                     close(sock);
-                    freeaddrinfo(result);
                     return 3;
                 }
                 printf("%s\n", email);
@@ -1238,7 +1233,6 @@ int main(const int argc, char **argv)
             if(imap_fetch_message(sock, messageNum, &email) != 0) {
                 printf("Message not found\n");
                 close(sock);
-                freeaddrinfo(result);
                 return 3;
             }
             printf("%s\n", email);
@@ -1253,7 +1247,6 @@ int main(const int argc, char **argv)
         {
             printf("Header not found\n");
             close(sock);
-            freeaddrinfo(result);
             return 1;
         }
         printf("%s\n",header);
@@ -1265,7 +1258,6 @@ int main(const int argc, char **argv)
         if (imap_fetch_message(sock, messageNum, &email) != 0) {
             printf("Message not found\n");
             close(sock);
-            freeaddrinfo(result);
             return 3;
         }
         char* mime = NULL;
@@ -1273,7 +1265,6 @@ int main(const int argc, char **argv)
         {
             printf("Mime not found\n");
            close(sock);
-            freeaddrinfo(result);
             return 3;
         }
         printf("%s", mime);
@@ -1287,13 +1278,11 @@ int main(const int argc, char **argv)
         {
             printf("List not found\n");
             close(sock);
-            freeaddrinfo(result);
             return 3;
         }
         free(mailList);
     }
     close(sock);
-    freeaddrinfo(result);
     SSL_free(ssl);
     close(sock);
     SSL_CTX_free(ctx);
